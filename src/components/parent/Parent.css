@@ -1,0 +1,5 @@
+/* Parent Dashboard Styles */
+.parent-requirement-card { background: #fff; border: 1px solid #E5E7EB; border-radius: 14px; padding: 24px; }
+.parent-tutor-card { background: #fff; border: 1px solid #E5E7EB; border-radius: 14px; padding: 20px; transition: all 0.2s; }
+.parent-tutor-card:hover { box-shadow: 0 8px 28px rgba(26,86,219,.12); border-color: #93C5FD; }
+.parent-pending { background: #FFFBEB; border: 1px solid #FDE68A; border-radius: 16px; padding: 40px 32px; text-align: center; }

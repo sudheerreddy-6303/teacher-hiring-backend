@@ -1,0 +1,10 @@
+/* Auth Page Styles */
+.auth-card { background: #fff; border-radius: 20px; padding: 40px; box-shadow: 0 8px 40px rgba(0,0,0,.12); width: 100%; max-width: 480px; }
+.auth-logo { text-align: center; margin-bottom: 28px; }
+.auth-step-bar { display: flex; gap: 0; margin-bottom: 28px; }
+.auth-step { flex: 1; text-align: center; font-size: 12px; font-weight: 700; padding: 8px 4px; border-bottom: 3px solid #E5E7EB; color: #9CA3AF; transition: all 0.2s; }
+.auth-step.active { border-color: #1A56DB; color: #1A56DB; }
+.auth-step.done { border-color: #059669; color: #059669; }
+.otp-input { width: 48px; height: 56px; text-align: center; font-size: 22px; font-weight: 800; border-radius: 10px; outline: none; font-family: Nunito, sans-serif; transition: all 0.15s; }
+.role-card { padding: 14px 10px; border-radius: 10px; cursor: pointer; border: 2px solid #E5E7EB; background: #F9FAFB; text-align: center; font-size: 12px; font-weight: 700; color: #6B7280; transition: all 0.15s; }
+.role-card.selected { border-color: #1A56DB; background: #EBF5FF; color: #1A56DB; }

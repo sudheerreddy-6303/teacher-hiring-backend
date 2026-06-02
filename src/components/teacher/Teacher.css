@@ -1,0 +1,9 @@
+/* Teacher Dashboard Styles */
+.teacher-sidebar { background: linear-gradient(180deg,#1E3A8A 0%,#1A56DB 100%); }
+.teacher-progress-bar { height: 8px; border-radius: 4px; background: #E5E7EB; overflow: hidden; }
+.teacher-progress-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; }
+.teacher-profile-photo { width: 80px; height: 80px; border-radius: 50%; border: 3px solid #BFDBFE; object-fit: cover; }
+.teacher-pill { padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 700; cursor: pointer; transition: all 0.15s; user-select: none; display: inline-flex; align-items: center; }
+.teacher-pill.selected { background: #EBF5FF; border-color: #1A56DB; color: #1A56DB; }
+.teacher-pill.unselected { background: #fff; border: 1.5px solid #D1D5DB; color: #374151; }
+.teacher-section-head { font-weight: 800; font-size: 13px; color: #1A56DB; text-transform: uppercase; letter-spacing: 1px; padding-bottom: 8px; border-bottom: 2px solid #EBF5FF; margin-bottom: 18px; }

@@ -1,0 +1,117 @@
+
+// Shared constants
+export const MOCK_JOBS = [
+  { id:1,  title:"Senior Mathematics Teacher",   institute:"Delhi Public School",        location:"Hyderabad",  type:"Full-Time",    salary:"₹45,000–₹60,000/mo", subject:"Mathematics",      experience:"3+ Years",   posted:"2 days ago",  applicants:12, logo:"🏫" },
+  { id:2,  title:"Physics Tutor (Grade 11-12)",  institute:"Narayana College",           location:"Bangalore",  type:"Part-Time",    salary:"₹800–₹1,200/hr",      subject:"Physics",          experience:"2+ Years",   posted:"1 day ago",   applicants:8,  logo:"🎓" },
+  { id:3,  title:"English Language Instructor",  institute:"British Language Institute", location:"Mumbai",     type:"Full-Time",    salary:"₹35,000–₹50,000/mo", subject:"English",          experience:"1+ Years",   posted:"3 days ago",  applicants:24, logo:"📚" },
+  { id:4,  title:"Computer Science Teacher",     institute:"St. Xavier's School",        location:"Chennai",    type:"Full-Time",    salary:"₹50,000–₹70,000/mo", subject:"Computer Science", experience:"4+ Years",   posted:"5 days ago",  applicants:6,  logo:"🏛️" },
+  { id:5,  title:"Chemistry Home Tutor",         institute:"Individual / Private",       location:"Hyderabad",  type:"Home Tuition", salary:"₹600–₹900/hr",        subject:"Chemistry",        experience:"1+ Years",   posted:"Today",       applicants:3,  logo:"🧪" },
+  { id:6,  title:"Kindergarten Teacher",         institute:"Sunshine Montessori",        location:"Pune",       type:"Full-Time",    salary:"₹25,000–₹35,000/mo", subject:"Early Education",  experience:"Fresher OK", posted:"4 days ago",  applicants:18, logo:"🌟" },
+  { id:7,  title:"Social Science Teacher",       institute:"Kendriya Vidyalaya",         location:"Delhi",      type:"Full-Time",    salary:"₹38,000–₹52,000/mo", subject:"Social Science",   experience:"2+ Years",   posted:"6 days ago",  applicants:10, logo:"🏛️" },
+  { id:8,  title:"Commerce & Accountancy",       institute:"Sri Chaitanya Jr. College",  location:"Vijayawada", type:"Full-Time",    salary:"₹42,000–₹58,000/mo", subject:"Commerce",         experience:"3+ Years",   posted:"1 week ago",  applicants:15, logo:"📊" },
+  { id:9,  title:"Hindi Language Teacher",       institute:"Ryan International School",  location:"Gurgaon",    type:"Full-Time",    salary:"₹30,000–₹45,000/mo", subject:"Hindi",            experience:"2+ Years",   posted:"2 days ago",  applicants:7,  logo:"📖" },
+];
+
+export const MOCK_PENDING = [
+  { id:10, title:"Biology Teacher",        institute:"Sri Chaitanya Jr. College", location:"Vijayawada", type:"Full-Time", salary:"₹40,000–₹55,000/mo", subject:"Biology", experience:"2+ Years", posted:"1 hour ago",  logo:"🔬", postedBy:"admin@srichaitanya.com" },
+  { id:11, title:"Hindi Language Teacher", institute:"Kendriya Vidyalaya",        location:"Delhi",      type:"Full-Time", salary:"₹35,000–₹48,000/mo", subject:"Hindi",   experience:"3+ Years", posted:"3 hours ago", logo:"📖", postedBy:"kv.delhi@gov.in" },
+];
+
+
+
+export const SUBS = ["Mathematics","Physics","Chemistry","Biology","English","Hindi","Social Science",
+  "Computer Science","Economics","Commerce","Physical Education","Sanskrit","Telugu",
+  "Kannada","Tamil","Accountancy","Business Studies","History","Geography"];
+
+export const INDIA_LOCATIONS = {
+  "Andhra Pradesh":    ["Visakhapatnam","Vijayawada","Guntur","Tirupati","Kakinada","Nellore","Kurnool","Rajahmundry"],
+  "Telangana":         ["Hyderabad","Warangal","Karimnagar","Nizamabad","Khammam","Secunderabad","Nalgonda"],
+  "Karnataka":         ["Bengaluru","Mysuru","Hubli","Mangaluru","Belagavi","Kalaburagi","Davangere"],
+  "Maharashtra":       ["Mumbai","Pune","Nagpur","Nashik","Aurangabad","Solapur","Kolhapur","Thane","Navi Mumbai"],
+  "Tamil Nadu":        ["Chennai","Coimbatore","Madurai","Tiruchirappalli","Salem","Tirunelveli","Erode","Vellore"],
+  "Kerala":            ["Thiruvananthapuram","Kochi","Kozhikode","Thrissur","Kollam","Kannur","Palakkad"],
+  "Delhi":             ["New Delhi","Central Delhi","South Delhi","North Delhi","East Delhi","West Delhi","Dwarka","Rohini"],
+  "Uttar Pradesh":     ["Lucknow","Kanpur","Agra","Varanasi","Prayagraj","Meerut","Ghaziabad","Noida"],
+  "Rajasthan":         ["Jaipur","Jodhpur","Udaipur","Kota","Ajmer","Bikaner","Alwar"],
+  "Gujarat":           ["Ahmedabad","Surat","Vadodara","Rajkot","Bhavnagar","Jamnagar","Gandhinagar"],
+  "West Bengal":       ["Kolkata","Howrah","Durgapur","Asansol","Siliguri","Bardhaman"],
+  "Madhya Pradesh":    ["Bhopal","Indore","Gwalior","Jabalpur","Ujjain","Sagar","Dewas"],
+  "Bihar":             ["Patna","Gaya","Muzaffarpur","Bhagalpur","Darbhanga","Purnia"],
+  "Punjab":            ["Ludhiana","Amritsar","Jalandhar","Patiala","Bathinda","Mohali","Chandigarh"],
+  "Haryana":           ["Faridabad","Gurugram","Panipat","Ambala","Karnal","Rohtak","Hisar"],
+  "Odisha":            ["Bhubaneswar","Cuttack","Rourkela","Berhampur","Sambalpur"],
+  "Jharkhand":         ["Ranchi","Jamshedpur","Dhanbad","Bokaro","Deoghar"],
+  "Assam":             ["Guwahati","Silchar","Dibrugarh","Jorhat","Nagaon"],
+  "Himachal Pradesh":  ["Shimla","Dharamshala","Manali","Solan","Mandi"],
+  "Uttarakhand":       ["Dehradun","Haridwar","Roorkee","Nainital","Haldwani"],
+  "Goa":               ["Panaji","Margao","Vasco da Gama","Mapusa","Ponda"],
+  "Chhattisgarh":      ["Raipur","Bhilai","Bilaspur","Korba","Durg"],
+};
+
+export const HERO_SLIDES = [
+  {
+    name:    "Delhi Public School",
+    city:    "New Delhi",
+    board:   "CBSE",
+    type:    "Senior Secondary School",
+    open:    12,
+    emoji:   "🏛️",
+    color:   "#1A56DB",
+    bg:      "linear-gradient(135deg,#1E429F,#1A56DB)",
+    tag:     "⭐ Verified Partner",
+    roles:   ["Mathematics Teacher","Physics Teacher","English Teacher","Commerce Faculty"],
+    est:     "Est. 1949",
+  },
+  {
+    name:    "Sri Chaitanya Jr. College",
+    city:    "Hyderabad",
+    board:   "CBSE / TS State",
+    type:    "Junior College & Coaching",
+    open:    18,
+    emoji:   "🎓",
+    color:   "#059669",
+    bg:      "linear-gradient(135deg,#065F46,#059669)",
+    tag:     "🔥 Actively Hiring",
+    roles:   ["Chemistry Faculty","Biology Teacher","Maths Faculty","Physics HOD"],
+    est:     "Est. 1986",
+  },
+  {
+    name:    "Ryan International School",
+    city:    "Gurgaon",
+    board:   "CBSE",
+    type:    "International School",
+    open:    8,
+    emoji:   "🌟",
+    color:   "#D97706",
+    bg:      "linear-gradient(135deg,#92400E,#D97706)",
+    tag:     "💼 Premium School",
+    roles:   ["Hindi Teacher","Social Science Teacher","Sports Coach","Computer Teacher"],
+    est:     "Est. 1976",
+  },
+  {
+    name:    "FIITJEE",
+    city:    "Delhi",
+    board:   "IIT-JEE",
+    type:    "Coaching Institute",
+    open:    15,
+    emoji:   "🔬",
+    color:   "#6D28D9",
+    bg:      "linear-gradient(135deg,#4C1D95,#6D28D9)",
+    tag:     "🚀 Fast Growing",
+    roles:   ["JEE Maths Faculty","JEE Physics Faculty","JEE Chemistry Faculty","NEET Biology"],
+    est:     "Est. 1992",
+  },
+  {
+    name:    "Kendriya Vidyalaya",
+    city:    "Multiple Cities",
+    board:   "CBSE",
+    type:    "Central Government School",
+    open:    24,
+    emoji:   "🏫",
+    color:   "#DC2626",
+    bg:      "linear-gradient(135deg,#991B1B,#DC2626)",
+    tag:     "🏅 Government School",
+    roles:   ["TGT Science","TGT Mathematics","PGT Chemistry","PRT Teacher"],
+    est:     "Est. 1963",
+  },
+];
