@@ -16,8 +16,15 @@ const adminRoutes   = require('./routes/adminRoutes');
 const app = express();
 
 // ── CORS ──────────────────────────────────────────────────────────────────────
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
-  .split(',').map(s => s.trim()).filter(Boolean);
+// Built-in defaults so the deployed frontend works out of the box.
+// Add more (comma-separated) via the ALLOWED_ORIGINS env var.
+const DEFAULT_ORIGINS = [
+  'https://teacher-hiring-frontend-production.up.railway.app',
+];
+const allowedOrigins = [
+  ...DEFAULT_ORIGINS,
+  ...(process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean),
+];
 
 app.use(cors({
   origin: (origin, cb) => {
@@ -41,6 +48,15 @@ const tc   = require('./controllers/teacherController');
 app.get ('/api/profile', auth(), tc.getGeneralProfile);
 app.patch('/api/profile', auth(), tc.updateGeneralProfile);
 
+// ── Root + Health (declared BEFORE /api mounts so they can't be shadowed) ──────
+app.get('/', (req, res) => res.json({
+  name: 'AcadHr API',
+  status: 'running',
+  health: '/api/health',
+  hint: 'This is an API server. Use the /api/* endpoints.',
+}));
+app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date() }));
+
 // ── Routes ────────────────────────────────────────────────────────────────────
 app.use('/api/auth',    authRoutes);
 app.use('/api/teacher', teacherRoutes);
@@ -51,9 +67,6 @@ app.use('/api/admin',   adminRoutes);
 // Tutors for parents
 const adminCtrl = require('./controllers/adminController');
 app.get('/api/tutors', auth(['parent']), adminCtrl.getTutorsForParent);
-
-// ── Health ────────────────────────────────────────────────────────────────────
-app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date() }));
 
 // ── 404 / Error handlers ──────────────────────────────────────────────────────
 app.use((req, res) => res.status(404).json({ message: `${req.method} ${req.path} not found.` }));
