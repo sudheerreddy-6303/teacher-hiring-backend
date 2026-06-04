@@ -61,18 +61,23 @@ async function sendOtpEmail(email, name, otp, type) {
   </div>
 </div></body></html>`;
 
-  await mailer.sendMail({
-    from:        process.env.EMAIL_FROM || `"${COMPANY_NAME}" <noreply@acadhr.com>`,
-    to:          email,
+  const fs = require('fs');
+  const logoPath = path.join(__dirname, '..', 'acadhr-logo.png');
+  const mailOpts = {
+    from: process.env.EMAIL_FROM || `"${COMPANY_NAME}" <noreply@acadhr.com>`,
+    to: email,
     subject,
     html,
-    attachments: [{
-      filename:    'acadhr-logo.png',
-      path:        path.join(__dirname, '..', 'acadhr-logo.png'),
-      cid:         'acadhr-logo',
+  };
+  if (fs.existsSync(logoPath)) {
+    mailOpts.attachments = [{
+      filename: 'acadhr-logo.png',
+      path: logoPath,
+      cid: 'acadhr-logo',
       contentType: 'image/png',
-    }],
-  });
+    }];
+  }
+  await mailer.sendMail(mailOpts);
 }
 
 module.exports = { sendOtpEmail, OTP_EXPIRY_MINS };

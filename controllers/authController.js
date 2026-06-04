@@ -103,8 +103,17 @@ async function sendLoginOtp(req, res) {
     const exp = new Date(Date.now() + OTP_EXPIRY_MINS * 60000);
     await db.query('DELETE FROM otps WHERE email = ? AND type = ?', [email, 'login']);
     await db.query('INSERT INTO otps (email, otp, type, expires_at) VALUES (?,?,?,?)', [email, otp, 'login', exp]);
-    await sendOtpEmail(email, user.name, otp, 'login');
-    res.json({ message: 'OTP sent to email.' });
+    try {
+      await sendOtpEmail(email, user.name, otp, 'login');
+    } catch (mailErr) {
+      console.error('[sendLoginOtp] email:', mailErr.message);
+      // Still allow login when SMTP fails — OTP logged on server
+    }
+    const { EMAIL_CONFIGURED } = require('../config/mailer');
+    res.json({
+      message: EMAIL_CONFIGURED ? 'OTP sent to email.' : 'OTP generated (check server logs if email not configured).',
+      dev: !EMAIL_CONFIGURED,
+    });
   } catch (err) { console.error('[sendLoginOtp]', err); res.status(500).json({ message: 'Error: ' + err.message }); }
 }
 

@@ -15,6 +15,9 @@ const adminRoutes   = require('./routes/adminRoutes');
 
 const app = express();
 
+// Railway / Render sit behind a reverse proxy — required for rate-limit + req.ip
+app.set('trust proxy', 1);
+
 // ── CORS — allow all origins (Render + Railway + local) ──────────────────────
 app.use(cors({
   origin: true,          // reflect request origin — allows all
@@ -36,18 +39,7 @@ const tc   = require('./controllers/teacherController');
 app.get ('/api/profile', auth(), tc.getGeneralProfile);
 app.patch('/api/profile', auth(), tc.updateGeneralProfile);
 
-// ── Routes ────────────────────────────────────────────────────────────────────
-app.use('/api/auth',    authRoutes);
-app.use('/api/teacher', teacherRoutes);
-app.use('/api/jobs',    jobRoutes);
-app.use('/api',         jobRoutes);
-app.use('/api/admin',   adminRoutes);
-
-// Tutors for parents
-const adminCtrl = require('./controllers/adminController');
-app.get('/api/tutors', auth(['parent']), adminCtrl.getTutorsForParent);
-
-// ── Root + health (Railway / browser visit the base URL) ─────────────────────
+// ── Root + health (must be BEFORE app.use('/api', jobRoutes)) ────────────────
 async function healthHandler(req, res) {
   try {
     await db.query('SELECT 1');
@@ -62,12 +54,23 @@ app.get('/', (req, res) => {
     name: 'AcadHr API',
     status: 'running',
     health: '/api/health',
-    docs: 'All routes are under /api — e.g. /api/auth/login, /api/jobs',
+    docs: 'All routes are under /api — e.g. /api/auth/send-login-otp, /api/jobs',
   });
 });
 
 app.get('/health', healthHandler);
 app.get('/api/health', healthHandler);
+
+// ── Routes ────────────────────────────────────────────────────────────────────
+app.use('/api/auth',    authRoutes);
+app.use('/api/teacher', teacherRoutes);
+app.use('/api/jobs',    jobRoutes);
+app.use('/api',         jobRoutes);
+app.use('/api/admin',   adminRoutes);
+
+// Tutors for parents
+const adminCtrl = require('./controllers/adminController');
+app.get('/api/tutors', auth(['parent']), adminCtrl.getTutorsForParent);
 
 // ── 404 handler ──────────────────────────────────────────────────────────────
 app.use((req, res) => res.status(404).json({ message: `${req.method} ${req.path} not found.` }));
