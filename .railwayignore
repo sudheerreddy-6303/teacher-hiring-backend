@@ -1,0 +1,5 @@
+uploads/photos/*
+uploads/resumes/*
+*.log
+.env.example
+README.md

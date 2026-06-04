@@ -56,7 +56,15 @@ const adminCtrl = require('./controllers/adminController');
 app.get('/api/tutors', auth(['parent']), adminCtrl.getTutorsForParent);
 
 // ── Health ────────────────────────────────────────────────────────────────────
-app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date() }));
+app.get('/api/health', async (req, res) => {
+  try {
+    await db.query('SELECT 1');
+    res.json({ status: 'ok', db: 'connected', time: new Date() });
+  } catch {
+    // Still return 200 so Railway doesn't kill the process during DB init
+    res.json({ status: 'ok', db: 'connecting', time: new Date() });
+  }
+});
 
 // ── 404 handler ──────────────────────────────────────────────────────────────
 app.use((req, res) => res.status(404).json({ message: `${req.method} ${req.path} not found.` }));
@@ -67,7 +75,7 @@ app.use((err, req, res, _next) => {
 
 // ── Startup + DB migrations ───────────────────────────────────────────────────
 const PORT = Number(process.env.PORT) || 5000;
-app.listen(PORT, async () => {
+app.listen(PORT, '0.0.0.0', async () => {
   console.log(`\n🚀  AcadHr API  →  http://localhost:${PORT}`);
 
   try { await db.query('SELECT 1'); console.log('✅  MySQL connected'); }
