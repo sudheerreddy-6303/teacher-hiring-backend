@@ -1,6 +1,6 @@
 'use strict';
 const db            = require('../config/db');
-const { uploadPhoto } = require('../config/multer');
+const { uploadPhoto, uploadResume } = require('../config/multer');
 
 // GET /api/teacher/profile
 async function getProfile(req, res) {
@@ -29,10 +29,14 @@ async function updateProfile(req, res) {
       'profile_status','remarks','completion_pct','profile_photo',
     ];
     const dateFields = ['dob', 'available_from'];
-    const sanitize = (field, val) =>
-      (val === undefined || val === '' || val === null)
-        ? null
-        : val;
+    const sanitize = (field, val) => {
+      if (val === undefined || val === '' || val === null) return null;
+      // Strip ISO datetime to DATE only: "2001-04-07T18:30:00.000Z" → "2001-04-07"
+      if (dateFields.includes(field) && typeof val === 'string' && val.includes('T')) {
+        return val.split('T')[0];
+      }
+      return val;
+    };
 
     if (req.body.full_name) {
       await db.query('UPDATE users SET name = ? WHERE id = ?', [req.body.full_name, req.user.id]);
@@ -70,7 +74,17 @@ function uploadPhotoHandler(req, res) {
     try {
       if (!req.file) return res.status(400).json({ message: 'No file uploaded.' });
       const photoUrl = `/uploads/photos/${req.file.filename}`;
-      await db.query('UPDATE teachers SET profile_photo = ? WHERE user_id = ?', [photoUrl, req.user.id]);
+      // Upsert — update if row exists, insert if new teacher
+      const [result] = await db.query(
+        'UPDATE teachers SET profile_photo = ? WHERE user_id = ?',
+        [photoUrl, req.user.id]
+      );
+      if (result.affectedRows === 0) {
+        await db.query(
+          'INSERT INTO teachers (user_id, profile_photo) VALUES (?, ?)',
+          [req.user.id, photoUrl]
+        );
+      }
       res.json({ message: 'Photo uploaded.', photo_url: photoUrl });
     } catch (e) {
       console.error('[upload-photo]', e);
@@ -123,4 +137,31 @@ async function updateGeneralProfile(req, res) {
   } catch (err) { res.status(500).json({ message: 'Error updating profile.' }); }
 }
 
-module.exports = { getProfile, updateProfile, uploadPhotoHandler, getGeneralProfile, updateGeneralProfile };
+// POST /api/teacher/upload-resume
+function uploadResumeHandler(req, res) {
+  uploadResume(req, res, async (err) => {
+    if (err) return res.status(400).json({ message: err.message });
+    try {
+      if (!req.file) return res.status(400).json({ message: 'No file uploaded.' });
+      const resumeUrl  = `/uploads/resumes/${req.file.filename}`;
+      const resumeName = req.file.originalname;
+      // Upsert — update if row exists, insert if new teacher
+      const [result] = await db.query(
+        'UPDATE teachers SET resume_link = ?, resume_file_name = ? WHERE user_id = ?',
+        [resumeUrl, resumeName, req.user.id]
+      );
+      if (result.affectedRows === 0) {
+        await db.query(
+          'INSERT INTO teachers (user_id, resume_link, resume_file_name) VALUES (?, ?, ?)',
+          [req.user.id, resumeUrl, resumeName]
+        );
+      }
+      res.json({ message: 'Resume uploaded.', resume_link: resumeUrl, resume_file_name: resumeName });
+    } catch (e) {
+      console.error('[upload-resume]', e);
+      res.status(500).json({ message: 'Upload failed: ' + e.message });
+    }
+  });
+}
+
+module.exports = { getProfile, updateProfile, uploadPhotoHandler, uploadResumeHandler, getGeneralProfile, updateGeneralProfile };

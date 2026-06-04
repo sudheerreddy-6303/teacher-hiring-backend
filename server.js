@@ -16,22 +16,18 @@ const adminRoutes   = require('./routes/adminRoutes');
 const app = express();
 
 // ── CORS ──────────────────────────────────────────────────────────────────────
-// Built-in defaults so the deployed frontend works out of the box.
-// Add more (comma-separated) via the ALLOWED_ORIGINS env var.
-const DEFAULT_ORIGINS = [
-  'https://teacher-hiring-frontend-production.up.railway.app',
-];
-const allowedOrigins = [
-  ...DEFAULT_ORIGINS,
-  ...(process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean),
-];
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+  .split(',').map(s => s.trim()).filter(Boolean);
 
 app.use(cors({
   origin: (origin, cb) => {
     if (!origin) return cb(null, true);
+    if (!origin) return cb(null, true);
+    if (allowedOrigins.length === 0) return cb(null, true); // dev: allow all
     if (allowedOrigins.includes(origin)) return cb(null, true);
-    if (/^http:\/\/localhost:\d+$/.test(origin)) return cb(null, true);
-    cb(new Error(`CORS: ${origin} not allowed`));
+    if (/^https?:\/\/localhost:\d+$/.test(origin)) return cb(null, true);
+    if (origin.includes('railway.app') || origin.includes('up.railway.app')) return cb(null, true);
+    cb(null, true); // allow all in production for now
   },
   credentials: true,
 }));
@@ -48,15 +44,6 @@ const tc   = require('./controllers/teacherController');
 app.get ('/api/profile', auth(), tc.getGeneralProfile);
 app.patch('/api/profile', auth(), tc.updateGeneralProfile);
 
-// ── Root + Health (declared BEFORE /api mounts so they can't be shadowed) ──────
-app.get('/', (req, res) => res.json({
-  name: 'AcadHr API',
-  status: 'running',
-  health: '/api/health',
-  hint: 'This is an API server. Use the /api/* endpoints.',
-}));
-app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date() }));
-
 // ── Routes ────────────────────────────────────────────────────────────────────
 app.use('/api/auth',    authRoutes);
 app.use('/api/teacher', teacherRoutes);
@@ -68,7 +55,10 @@ app.use('/api/admin',   adminRoutes);
 const adminCtrl = require('./controllers/adminController');
 app.get('/api/tutors', auth(['parent']), adminCtrl.getTutorsForParent);
 
-// ── 404 / Error handlers ──────────────────────────────────────────────────────
+// ── Health ────────────────────────────────────────────────────────────────────
+app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date() }));
+
+// ── 404 handler ──────────────────────────────────────────────────────────────
 app.use((req, res) => res.status(404).json({ message: `${req.method} ${req.path} not found.` }));
 app.use((err, req, res, _next) => {
   console.error('[Unhandled]', err);
@@ -96,7 +86,31 @@ app.listen(PORT, async () => {
 
   try { await db.query(`ALTER TABLE users MODIFY COLUMN role ENUM('teacher','tutor','school','admin','parent') NOT NULL`); } catch {}
 
-  // Fix otps table — recreate if it has wrong columns (otp_hash instead of otp)
+  // ── Create/update admin account ──────────────────────────────────────────
+  try {
+    const bcrypt = require('bcryptjs');
+    const ADMIN_EMAIL = 'acadhire01@gmail.com';
+    const ADMIN_PASS  = 'acadhire@2026';
+    const ADMIN_NAME  = 'AcadHr Admin';
+
+    const [[existing]] = await db.query('SELECT id FROM users WHERE email = ?', [ADMIN_EMAIL]);
+    if (existing) {
+      // Update password and ensure role is admin
+      const hash = await bcrypt.hash(ADMIN_PASS, 10);
+      await db.query(
+        'UPDATE users SET password = ?, role = ?, is_email_verified = 1, is_active = 1 WHERE email = ?',
+        [hash, 'admin', ADMIN_EMAIL]
+      );
+      console.log('✅  Admin account updated:', ADMIN_EMAIL);
+    } else {
+      const hash = await bcrypt.hash(ADMIN_PASS, 10);
+      await db.query(
+        'INSERT INTO users (name, email, password, role, is_email_verified, is_active) VALUES (?, ?, ?, ?, 1, 1)',
+        [ADMIN_NAME, ADMIN_EMAIL, hash, 'admin']
+      );
+      console.log('✅  Admin account created:', ADMIN_EMAIL);
+    }
+  } catch (err) { console.error('⚠️  Admin setup:', err.message); }
   try {
     const [cols] = await db.query(
       `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
