@@ -47,16 +47,27 @@ app.use('/api/admin',   adminRoutes);
 const adminCtrl = require('./controllers/adminController');
 app.get('/api/tutors', auth(['parent']), adminCtrl.getTutorsForParent);
 
-// ── Health ────────────────────────────────────────────────────────────────────
-app.get('/api/health', async (req, res) => {
+// ── Root + health (Railway / browser visit the base URL) ─────────────────────
+async function healthHandler(req, res) {
   try {
     await db.query('SELECT 1');
     res.json({ status: 'ok', db: 'connected', time: new Date() });
   } catch {
-    // Still return 200 so Railway doesn't kill the process during DB init
     res.json({ status: 'ok', db: 'connecting', time: new Date() });
   }
+}
+
+app.get('/', (req, res) => {
+  res.json({
+    name: 'AcadHr API',
+    status: 'running',
+    health: '/api/health',
+    docs: 'All routes are under /api — e.g. /api/auth/login, /api/jobs',
+  });
 });
+
+app.get('/health', healthHandler);
+app.get('/api/health', healthHandler);
 
 // ── 404 handler ──────────────────────────────────────────────────────────────
 app.use((req, res) => res.status(404).json({ message: `${req.method} ${req.path} not found.` }));
