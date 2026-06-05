@@ -215,7 +215,10 @@ async function setupDatabase() {
       ['aadhaar_verified','VARCHAR(10)'],['resume_link','VARCHAR(500)'],
       ['resume_file_name','VARCHAR(300)'],["profile_status","VARCHAR(20) DEFAULT 'Active'"],
       ['remarks','TEXT'],['completion_pct','INT DEFAULT 0'],['profile_photo','VARCHAR(500)'],
+      ['terms_accepted',"VARCHAR(10) DEFAULT 'No'"],
     ]) await addCol('teachers', col, def);
+    // Widen demo_link so it can safely hold up to 3 Google Drive URLs
+    try { await db.query('ALTER TABLE `teachers` MODIFY COLUMN `demo_link` VARCHAR(1500)'); } catch {}
     console.log('✅  Teachers table ready');
   } catch (err) { console.error('⚠️  Teachers migration:', err.message); }
 

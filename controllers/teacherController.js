@@ -26,7 +26,7 @@ async function updateProfile(req, res) {
       'competitive_exams','teaching_mode','languages',
       'demo_available','demo_link','residential_pref','relocation_ready',
       'accommodation_req','aadhaar_verified','resume_link','resume_file_name',
-      'profile_status','remarks','completion_pct','profile_photo',
+      'profile_status','remarks','completion_pct','profile_photo','terms_accepted',
     ];
     const dateFields = ['dob', 'available_from'];
     const sanitize = (field, val) => {
