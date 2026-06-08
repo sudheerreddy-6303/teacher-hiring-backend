@@ -142,4 +142,20 @@ async function getTutorsForParent(req, res) {
   } catch (err) { res.status(500).json({ message: 'Error fetching tutors: ' + err.message }); }
 }
 
-module.exports = { getStats, getAllUsers, getTeachers, getTutors, getSchools, getParents, getAllJobs, getPendingJobs, updateJob, toggleUser, getAnalytics, getTutorsForParent };
+// Public tuition requirements posted by parents (no auth, no contact details exposed)
+async function getTuitions(req, res) {
+  try {
+    const [rows] = await db.query(`
+      SELECT u.id, u.name, u.city AS user_city, u.created_at,
+             p.student_class, p.board, p.subject, p.location, p.mode,
+             p.preferred_time, p.budget, p.tutor_gender_pref, p.experience_req, p.status, p.notes
+      FROM parents p JOIN users u ON u.id = p.user_id
+      WHERE u.role='parent' AND u.is_active=1
+        AND (p.status IS NULL OR p.status <> 'Closed')
+      ORDER BY u.created_at DESC
+    `);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ message: 'Error fetching tuitions: ' + err.message }); }
+}
+
+module.exports = { getStats, getAllUsers, getTeachers, getTutors, getSchools, getParents, getAllJobs, getPendingJobs, updateJob, toggleUser, getAnalytics, getTutorsForParent, getTuitions };

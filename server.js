@@ -12,6 +12,7 @@ const authRoutes    = require('./routes/authRoutes');
 const teacherRoutes = require('./routes/teacherRoutes');
 const jobRoutes     = require('./routes/jobRoutes');
 const adminRoutes   = require('./routes/adminRoutes');
+const feedbackRoutes = require('./routes/feedbackRoutes');
 
 const app = express();
 
@@ -65,6 +66,7 @@ app.get('/api/health', healthHandler);
 app.use('/api/auth',    authRoutes);
 app.use('/api/teacher', teacherRoutes);
 app.use('/api/jobs',    jobRoutes);
+app.use('/api/feedback', feedbackRoutes);
 app.use('/api',         jobRoutes);
 app.use('/api/admin',   adminRoutes);
 
