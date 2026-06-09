@@ -1,6 +1,7 @@
 'use strict';
 const db            = require('../config/db');
-const { uploadPhoto, uploadResume } = require('../config/multer');
+const { uploadPhoto, uploadResume, uploadPhotoMem, uploadResumeMem } = require('../config/multer');
+const { saveBlob } = require('./fileController');
 
 // GET /api/teacher/profile
 async function getProfile(req, res) {
@@ -69,11 +70,15 @@ async function updateProfile(req, res) {
 
 // POST /api/teacher/upload-photo
 function uploadPhotoHandler(req, res) {
-  uploadPhoto(req, res, async (err) => {
+  uploadPhotoMem(req, res, async (err) => {
     if (err) return res.status(400).json({ message: err.message });
     try {
       if (!req.file) return res.status(400).json({ message: 'No file uploaded.' });
-      const photoUrl = `/uploads/photos/${req.file.filename}`;
+      const ext      = (req.file.originalname.match(/\.[a-z0-9]+$/i) || ['.jpg'])[0].toLowerCase();
+      const filename = `teacher_${req.user.id}_${Date.now()}${ext}`;
+      const photoUrl = `/uploads/photos/${filename}`;
+      // Store the image bytes in the database so it survives deploys
+      await saveBlob(req.user.id, 'photo', filename, req.file.mimetype, req.file.buffer);
       // Upsert — update if row exists, insert if new teacher
       const [result] = await db.query(
         'UPDATE teachers SET profile_photo = ? WHERE user_id = ?',
@@ -139,12 +144,16 @@ async function updateGeneralProfile(req, res) {
 
 // POST /api/teacher/upload-resume
 function uploadResumeHandler(req, res) {
-  uploadResume(req, res, async (err) => {
+  uploadResumeMem(req, res, async (err) => {
     if (err) return res.status(400).json({ message: err.message });
     try {
       if (!req.file) return res.status(400).json({ message: 'No file uploaded.' });
-      const resumeUrl  = `/uploads/resumes/${req.file.filename}`;
+      const ext        = (req.file.originalname.match(/\.[a-z0-9]+$/i) || ['.pdf'])[0].toLowerCase();
+      const filename   = `resume_${req.user.id}_${Date.now()}${ext}`;
+      const resumeUrl  = `/uploads/resumes/${filename}`;
       const resumeName = req.file.originalname;
+      // Store the resume bytes in the database so it survives deploys
+      await saveBlob(req.user.id, 'resume', filename, req.file.mimetype, req.file.buffer);
       // Upsert — update if row exists, insert if new teacher
       const [result] = await db.query(
         'UPDATE teachers SET resume_link = ?, resume_file_name = ? WHERE user_id = ?',

@@ -8,6 +8,8 @@ const resumeDir = path.join(__dirname, '..', 'uploads', 'resumes');
 
 let uploadPhoto  = (req, res, next) => res.status(503).json({ message: 'Run: npm install' });
 let uploadResume = (req, res, next) => res.status(503).json({ message: 'Run: npm install' });
+let uploadPhotoMem  = (req, res, next) => res.status(503).json({ message: 'Run: npm install' });
+let uploadResumeMem = (req, res, next) => res.status(503).json({ message: 'Run: npm install' });
 
 try {
   const multer = require('multer');
@@ -46,5 +48,32 @@ try {
   console.error('⚠️  multer not installed — run: npm install');
 }
 
-module.exports = { uploadPhoto, uploadResume };
+// ── Memory-storage uploaders (file kept in RAM, then saved to the database) ──
+// Used so uploaded photos/resumes survive deploys (disk uploads are wiped on redeploy).
+try {
+  const multer = require('multer');
+  const memStorage = multer.memoryStorage();
+
+  uploadPhotoMem = multer({
+    storage:    memStorage,
+    limits:     { fileSize: 5 * 1024 * 1024 },
+    fileFilter: (req, file, cb) =>
+      /^image\/(jpeg|jpg|png|webp)$/.test(file.mimetype)
+        ? cb(null, true) : cb(new Error('Only JPG/PNG/WEBP images allowed')),
+  }).single('photo');
+
+  uploadResumeMem = multer({
+    storage:    memStorage,
+    limits:     { fileSize: 10 * 1024 * 1024 }, // 10MB
+    fileFilter: (req, file, cb) => {
+      const allowed = /\.(pdf|doc|docx)$/.test(file.originalname.toLowerCase()) ||
+                      /^application\/(pdf|msword|vnd\.openxmlformats-officedocument\.wordprocessingml\.document)$/.test(file.mimetype);
+      allowed ? cb(null, true) : cb(new Error('Only PDF/DOC/DOCX files allowed'));
+    },
+  }).single('resume');
+} catch (e) {
+  console.error('⚠️  multer not installed — DB uploads disabled');
+}
+
+module.exports = { uploadPhoto, uploadResume, uploadPhotoMem, uploadResumeMem };
 

@@ -33,6 +33,8 @@ app.use(express.urlencoded({ extended: true }));
 
 // ── Static uploads ────────────────────────────────────────────────────────────
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// Fallback: serve uploaded files from the database when missing on disk (survives deploys)
+app.use('/uploads', require('./routes/fileRoutes'));
 
 // ── Backward-compatible profile routes ───────────────────────────────────────
 const auth = require('./middleware/auth');
