@@ -83,7 +83,7 @@ async function signup(req, res) {
 
     await db.query('DELETE FROM otps WHERE email = ? AND type = ?', [email, 'signup']);
     const token = jwt.sign({ id: userId, name, email, role, city: city || null }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
-    res.status(201).json({ message: 'Account created.', token, user: { id: userId, name, email, role, city } });
+    res.status(201).json({ message: 'Account created.', token, user: { id: userId, name, email, role, city, subject: subject || null } });
   } catch (err) {
     console.error('[signup]', err);
     res.status(500).json({ message: 'Server error during signup: ' + err.message });
@@ -128,9 +128,14 @@ async function verifyLoginOtp(req, res) {
     if (!otpRow) return res.status(400).json({ message: 'Invalid or expired OTP.' });
     const [[user]] = await db.query('SELECT id,name,email,role,city,phone,is_active FROM users WHERE email = ?', [email]);
     if (!user) return res.status(404).json({ message: 'User not found.' });
+    // Look up the subject from the role-specific table so the dashboard can show it
+    let subject = null;
+    if (user.role === 'teacher')      { const [[r]] = await db.query('SELECT subject FROM teachers WHERE user_id = ?', [user.id]); subject = r?.subject || null; }
+    else if (user.role === 'tutor')   { const [[r]] = await db.query('SELECT subject FROM tutors  WHERE user_id = ?', [user.id]); subject = r?.subject || null; }
+    else if (user.role === 'parent')  { const [[r]] = await db.query('SELECT subject FROM parents WHERE user_id = ?', [user.id]); subject = r?.subject || null; }
     await db.query('DELETE FROM otps WHERE email = ? AND type = ?', [email, 'login']);
     const token = jwt.sign({ id: user.id, name: user.name, email: user.email, role: user.role, city: user.city }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
-    res.json({ message: 'Login successful.', token, user: { id: user.id, name: user.name, email: user.email, role: user.role, city: user.city, phone: user.phone } });
+    res.json({ message: 'Login successful.', token, user: { id: user.id, name: user.name, email: user.email, role: user.role, city: user.city, phone: user.phone, subject } });
   } catch (err) { console.error('[verifyLoginOtp]', err); res.status(500).json({ message: 'Error: ' + err.message }); }
 }
 
@@ -149,6 +154,51 @@ async function resendOtp(req, res) {
   } catch (err) { res.status(500).json({ message: 'Error resending OTP.' }); }
 }
 
+// POST /api/auth/send-forgot-otp
+async function sendForgotOtp(req, res) {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ message: 'Email is required.' });
+    const [[user]] = await db.query('SELECT id, name FROM users WHERE email = ?', [email]);
+    if (!user) return res.status(404).json({ message: 'No account found with this email.' });
+    const otp = generateOtp();
+    const exp = new Date(Date.now() + OTP_EXPIRY_MINS * 60000);
+    await db.query('DELETE FROM otps WHERE email = ? AND type = ?', [email, 'reset']);
+    await db.query('INSERT INTO otps (email, otp, type, expires_at) VALUES (?,?,?,?)', [email, otp, 'reset', exp]);
+    try {
+      await sendOtpEmail(email, user.name, otp, 'reset');
+    } catch (mailErr) {
+      console.error('[sendForgotOtp] email:', mailErr.message);
+      // Still proceed when SMTP fails — OTP logged on server
+    }
+    const { EMAIL_CONFIGURED } = require('../config/mailer');
+    res.json({
+      message: EMAIL_CONFIGURED ? 'Password reset OTP sent to your email.' : 'OTP generated (check server logs if email not configured).',
+      dev: !EMAIL_CONFIGURED,
+    });
+  } catch (err) { console.error('[sendForgotOtp]', err); res.status(500).json({ message: 'Error sending OTP: ' + err.message }); }
+}
+
+// POST /api/auth/reset-password
+async function resetPassword(req, res) {
+  try {
+    const { email, otp, password } = req.body;
+    if (!email || !otp || !password) return res.status(400).json({ message: 'Email, OTP and new password are required.' });
+    if (String(password).length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters.' });
+    const [[otpRow]] = await db.query(
+      'SELECT * FROM otps WHERE email = ? AND type = ? AND otp = ? AND expires_at > NOW()',
+      [email, 'reset', otp]
+    );
+    if (!otpRow) return res.status(400).json({ message: 'Invalid or expired OTP.' });
+    const [[user]] = await db.query('SELECT id FROM users WHERE email = ?', [email]);
+    if (!user) return res.status(404).json({ message: 'User not found.' });
+    const hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    await db.query('UPDATE users SET password = ? WHERE email = ?', [hash, email]);
+    await db.query('DELETE FROM otps WHERE email = ? AND type = ?', [email, 'reset']);
+    res.json({ message: 'Password reset successful. You can now sign in with your new password.' });
+  } catch (err) { console.error('[resetPassword]', err); res.status(500).json({ message: 'Error: ' + err.message }); }
+}
+
 // GET /api/auth/me
 async function me(req, res) {
   try {
@@ -163,4 +213,4 @@ async function me(req, res) {
   } catch (err) { res.status(500).json({ message: 'Error fetching user.' }); }
 }
 
-module.exports = { sendSignupOtp, signup, sendLoginOtp, verifyLoginOtp, resendOtp, me };
+module.exports = { sendSignupOtp, signup, sendLoginOtp, verifyLoginOtp, resendOtp, sendForgotOtp, resetPassword, me };

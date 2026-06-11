@@ -18,10 +18,14 @@ async function sendOtpEmail(email, name, otp, type) {
 
   const subject = type === 'signup'
     ? `${otp} — Verify your ${COMPANY_NAME} account`
+    : type === 'reset'
+    ? `${otp} — Reset your ${COMPANY_NAME} password`
     : `${otp} — Your ${COMPANY_NAME} login code`;
 
   const action = type === 'signup'
     ? 'complete your registration'
+    : type === 'reset'
+    ? 'reset your password'
     : 'log in to your account';
 
   const html = `
