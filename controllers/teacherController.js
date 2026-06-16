@@ -3,6 +3,49 @@ const db            = require('../config/db');
 const { uploadPhoto, uploadResume, uploadPhotoMem, uploadResumeMem } = require('../config/multer');
 const { saveBlob } = require('./fileController');
 
+// Make sure the extra parent columns exist (runs once, lazily, on first parent profile update).
+let _parentColsReady = false;
+async function ensureParentColumns() {
+  if (_parentColsReady) return;
+  const cols = [
+    ['pincode', 'VARCHAR(20)'], ['state', 'VARCHAR(100)'], ['landmark', 'VARCHAR(300)'],
+    ['hourly_budget', 'VARCHAR(50)'], ['institute_name', 'VARCHAR(300)'],
+  ];
+  for (const [col, def] of cols) {
+    try {
+      const [rows] = await db.query(
+        `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='parents' AND COLUMN_NAME=?`,
+        [col]
+      );
+      if (!rows.length) await db.query(`ALTER TABLE parents ADD COLUMN \`${col}\` ${def}`);
+    } catch (e) { /* ignore individual column errors */ }
+  }
+  _parentColsReady = true;
+}
+
+// Make sure the extra tutor columns exist (runs once, lazily, on first tutor profile update).
+let _tutorColsReady = false;
+async function ensureTutorColumns() {
+  if (_tutorColsReady) return;
+  const cols = [
+    ['subjects', 'TEXT'], ['qualifications', 'TEXT'],
+    ['address', 'VARCHAR(300)'], ['location', 'VARCHAR(200)'], ['pincode', 'VARCHAR(20)'],
+    ['availability', 'VARCHAR(200)'], ['class_link', 'VARCHAR(500)'], ['gender', 'VARCHAR(20)'],
+  ];
+  for (const [col, def] of cols) {
+    try {
+      const [rows] = await db.query(
+        `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tutors' AND COLUMN_NAME=?`,
+        [col]
+      );
+      if (!rows.length) await db.query(`ALTER TABLE tutors ADD COLUMN \`${col}\` ${def}`);
+    } catch (e) { /* ignore individual column errors */ }
+  }
+  try { await db.query('ALTER TABLE tutors MODIFY COLUMN subject VARCHAR(255)'); } catch {}
+  try { await db.query('ALTER TABLE tutors MODIFY COLUMN qualification VARCHAR(255)'); } catch {}
+  _tutorColsReady = true;
+}
+
 // GET /api/teacher/profile
 async function getProfile(req, res) {
   try {
@@ -119,24 +162,61 @@ async function updateGeneralProfile(req, res) {
     const role = req.user.role;
     if (req.body.name) await db.query('UPDATE users SET name=?,city=?,phone=? WHERE id=?', [req.body.name, req.body.city||null, req.body.phone||null, req.user.id]);
     if (role === 'tutor') {
-      const { subject, experience, qualification, bio, hourly_rate, teaching_mode } = req.body;
-      await db.query('UPDATE tutors SET subject=COALESCE(?,subject), experience=COALESCE(?,experience), qualification=COALESCE(?,qualification), bio=COALESCE(?,bio), hourly_rate=COALESCE(?,hourly_rate), teaching_mode=COALESCE(?,teaching_mode) WHERE user_id=?',
-        [subject||null, experience||null, qualification||null, bio||null, hourly_rate||null, teaching_mode||null, req.user.id]);
+      const { subject, subjects, experience, qualification, qualifications, bio, hourly_rate, teaching_mode,
+              availability, address, location, pincode, class_link, gender } = req.body;
+      await ensureTutorColumns();
+      // Guarantee a tutors row exists (user_id is UNIQUE) so the UPDATE below always applies
+      try { await db.query('INSERT IGNORE INTO tutors (user_id) VALUES (?)', [req.user.id]); } catch (e) { /* ignore */ }
+      try {
+        await db.query(
+          `UPDATE tutors SET subject=COALESCE(?,subject), subjects=COALESCE(?,subjects),
+            experience=COALESCE(?,experience), qualification=COALESCE(?,qualification),
+            qualifications=COALESCE(?,qualifications), bio=COALESCE(?,bio),
+            hourly_rate=COALESCE(?,hourly_rate), teaching_mode=COALESCE(?,teaching_mode),
+            availability=COALESCE(?,availability), address=COALESCE(?,address),
+            location=COALESCE(?,location), pincode=COALESCE(?,pincode),
+            class_link=COALESCE(?,class_link), gender=COALESCE(?,gender) WHERE user_id=?`,
+          [subject||null, subjects||null, experience||null, qualification||null, qualifications||null, bio||null,
+           hourly_rate||null, teaching_mode||null, availability||null, address||null, location||null,
+           pincode||null, class_link||null, gender||null, req.user.id]);
+      } catch (e) {
+        console.error('[updateGeneralProfile tutor] rich update failed, using fallback:', e.message);
+        await db.query('UPDATE tutors SET subject=COALESCE(?,subject), experience=COALESCE(?,experience), qualification=COALESCE(?,qualification), bio=COALESCE(?,bio), hourly_rate=COALESCE(?,hourly_rate), teaching_mode=COALESCE(?,teaching_mode) WHERE user_id=?',
+          [subject||null, experience||null, qualification||null, bio||null, hourly_rate||null, teaching_mode||null, req.user.id]);
+      }
     } else if (role === 'school') {
       const { institute_type, est_year, student_count, website } = req.body;
       await db.query('UPDATE schools SET institute_type=COALESCE(?,institute_type), est_year=COALESCE(?,est_year), student_count=COALESCE(?,student_count), website=COALESCE(?,website) WHERE user_id=?',
         [institute_type||null, est_year||null, student_count||null, website||null, req.user.id]);
     } else if (role === 'parent') {
-      const { student_name, student_class, board, subject, location, mode, preferred_time, budget, tutor_gender_pref, experience_req, notes } = req.body;
-      await db.query(
-        `UPDATE parents SET student_name=COALESCE(?,student_name), student_class=COALESCE(?,student_class),
-          board=COALESCE(?,board), subject=COALESCE(?,subject), location=COALESCE(?,location),
-          mode=COALESCE(?,mode), preferred_time=COALESCE(?,preferred_time), budget=COALESCE(?,budget),
-          tutor_gender_pref=COALESCE(?,tutor_gender_pref), experience_req=COALESCE(?,experience_req),
-          notes=COALESCE(?,notes) WHERE user_id=?`,
-        [student_name||null, student_class||null, board||null, subject||null, location||null,
-         mode||null, preferred_time||null, budget||null, tutor_gender_pref||null, experience_req||null, notes||null, req.user.id]
-      );
+      const { student_name, student_class, board, subject, location, mode, preferred_time, budget, tutor_gender_pref, experience_req, notes,
+              state, pincode, landmark, hourly_budget, institute_name } = req.body;
+      await ensureParentColumns();
+      try {
+        await db.query(
+          `UPDATE parents SET student_name=COALESCE(?,student_name), student_class=COALESCE(?,student_class),
+            board=COALESCE(?,board), subject=COALESCE(?,subject), location=COALESCE(?,location),
+            mode=COALESCE(?,mode), preferred_time=COALESCE(?,preferred_time), budget=COALESCE(?,budget),
+            tutor_gender_pref=COALESCE(?,tutor_gender_pref), experience_req=COALESCE(?,experience_req),
+            notes=COALESCE(?,notes), state=COALESCE(?,state), pincode=COALESCE(?,pincode),
+            landmark=COALESCE(?,landmark), hourly_budget=COALESCE(?,hourly_budget),
+            institute_name=COALESCE(?,institute_name) WHERE user_id=?`,
+          [student_name||null, student_class||null, board||null, subject||null, location||null,
+           mode||null, preferred_time||null, budget||null, tutor_gender_pref||null, experience_req||null, notes||null,
+           state||null, pincode||null, landmark||null, hourly_budget||null, institute_name||null, req.user.id]
+        );
+      } catch (e) {
+        console.error('[updateGeneralProfile parent] rich update failed, using fallback:', e.message);
+        await db.query(
+          `UPDATE parents SET student_name=COALESCE(?,student_name), student_class=COALESCE(?,student_class),
+            board=COALESCE(?,board), subject=COALESCE(?,subject), location=COALESCE(?,location),
+            mode=COALESCE(?,mode), preferred_time=COALESCE(?,preferred_time), budget=COALESCE(?,budget),
+            tutor_gender_pref=COALESCE(?,tutor_gender_pref), experience_req=COALESCE(?,experience_req),
+            notes=COALESCE(?,notes) WHERE user_id=?`,
+          [student_name||null, student_class||null, board||null, subject||null, location||null,
+           mode||null, preferred_time||null, budget||null, tutor_gender_pref||null, experience_req||null, notes||null, req.user.id]
+        );
+      }
     }
     res.json({ message: 'Profile updated.' });
   } catch (err) { res.status(500).json({ message: 'Error updating profile.' }); }

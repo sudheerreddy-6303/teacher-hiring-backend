@@ -3,12 +3,61 @@ const bcrypt  = require('bcryptjs');
 const jwt     = require('jsonwebtoken');
 const db      = require('../config/db');
 const { sendOtpEmail, OTP_EXPIRY_MINS } = require('../utils/email');
+const { saveBlob } = require('./fileController');
 require('dotenv').config();
 
 const JWT_SECRET   = process.env.JWT_SECRET   || 'acadhr_secret_2025';
 const JWT_EXPIRES  = process.env.JWT_EXPIRES  || '7d';
 const VALID_ROLES  = ['teacher', 'tutor', 'school', 'parent'];
 const BCRYPT_ROUNDS = 12;
+
+// Make sure the extra tutor columns exist (runs once, lazily, on first tutor signup).
+// This guarantees tutor data saves even if the server.js startup migration didn't run.
+let _tutorColsReady = false;
+async function ensureTutorColumns() {
+  if (_tutorColsReady) return;
+  const cols = [
+    ['subjects', 'TEXT'], ['qualifications', 'TEXT'],
+    ['address', 'VARCHAR(300)'], ['location', 'VARCHAR(200)'], ['pincode', 'VARCHAR(20)'],
+    ['availability', 'VARCHAR(200)'], ['class_link', 'VARCHAR(500)'],
+    ['resume_link', 'VARCHAR(500)'], ['resume_file_name', 'VARCHAR(300)'],
+    ['gender', 'VARCHAR(20)'],
+  ];
+  for (const [col, def] of cols) {
+    try {
+      const [rows] = await db.query(
+        `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tutors' AND COLUMN_NAME=?`,
+        [col]
+      );
+      if (!rows.length) await db.query(`ALTER TABLE tutors ADD COLUMN \`${col}\` ${def}`);
+    } catch (e) { /* ignore individual column errors */ }
+  }
+  try { await db.query('ALTER TABLE tutors MODIFY COLUMN subject VARCHAR(255)'); } catch {}
+  try { await db.query('ALTER TABLE tutors MODIFY COLUMN qualification VARCHAR(255)'); } catch {}
+  _tutorColsReady = true;
+}
+
+// Make sure the extra parent columns exist (runs once, lazily, on first parent signup).
+let _parentColsReady = false;
+async function ensureParentColumns() {
+  if (_parentColsReady) return;
+  const cols = [
+    ['pincode', 'VARCHAR(20)'], ['state', 'VARCHAR(100)'], ['landmark', 'VARCHAR(300)'],
+    ['hourly_budget', 'VARCHAR(50)'], ['institute_name', 'VARCHAR(300)'],
+  ];
+  for (const [col, def] of cols) {
+    try {
+      const [rows] = await db.query(
+        `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='parents' AND COLUMN_NAME=?`,
+        [col]
+      );
+      if (!rows.length) await db.query(`ALTER TABLE parents ADD COLUMN \`${col}\` ${def}`);
+    } catch (e) { /* ignore individual column errors */ }
+  }
+  try { await db.query('ALTER TABLE parents MODIFY COLUMN subject VARCHAR(255)'); } catch {}
+  try { await db.query('ALTER TABLE parents MODIFY COLUMN preferred_time VARCHAR(255)'); } catch {}
+  _parentColsReady = true;
+}
 
 function generateOtp() { return String(Math.floor(100000 + Math.random() * 900000)); }
 
@@ -61,24 +110,77 @@ async function signup(req, res) {
         [userId, subject || null, experience || null, qualification || null, bio || null]
       );
     } else if (role === 'tutor') {
-      await db.query(
-        'INSERT INTO tutors (user_id, subject, experience, qualification, hourly_rate, teaching_mode) VALUES (?,?,?,?,?,?)',
-        [userId, subject || null, experience || null, qualification || null, hourly_rate || null, teaching_mode || null]
-      );
+      // Extra tutor fields (multi-selects arrive as arrays; resume as base64)
+      const { subjects, qualifications, availability, address, tutor_location,
+              pincode, class_link, resume_base64, resume_name, resume_type, gender } = req.body;
+      const join = v => Array.isArray(v) ? v.filter(Boolean).join(', ') : (v || '');
+      const subjectStr       = join(subjects)       || subject       || null;
+      const qualificationStr = join(qualifications) || qualification || null;
+      const availabilityStr  = join(availability)   || null;
+
+      // Optional resume upload → store bytes in file_blobs, keep a link on the tutor row
+      let resumeLink = null, resumeFileName = null;
+      if (resume_base64) {
+        try {
+          const buf  = Buffer.from(String(resume_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+          const safe = (resume_name || 'resume').replace(/[^a-zA-Z0-9._-]/g, '_');
+          const fname = `tutor_${userId}_${Date.now()}_${safe}`;
+          await saveBlob(userId, 'resume', fname, resume_type || 'application/octet-stream', buf);
+          resumeFileName = resume_name || safe;
+          resumeLink = `/uploads/resumes/${fname}`;
+        } catch (e) { console.error('[signup tutor resume]', e.message); }
+      }
+
+      // Rich insert (new columns); fall back to the original columns if a column is missing
+      await ensureTutorColumns();
+      try {
+        await db.query(
+          `INSERT INTO tutors (user_id, subject, subjects, experience, qualification, qualifications,
+             hourly_rate, teaching_mode, bio, address, location, pincode, availability, class_link,
+             resume_link, resume_file_name, gender)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [userId, subjectStr, join(subjects)||null, experience||null, qualificationStr, join(qualifications)||null,
+           hourly_rate||null, teaching_mode||null, bio||null, address||null, tutor_location||null, pincode||null,
+           availabilityStr, class_link||null, resumeLink, resumeFileName, gender||null]
+        );
+      } catch (e) {
+        console.error('[signup tutor] rich insert failed, using fallback:', e.message);
+        await db.query(
+          'INSERT INTO tutors (user_id, subject, experience, qualification, hourly_rate, teaching_mode, bio) VALUES (?,?,?,?,?,?,?)',
+          [userId, subjectStr, experience||null, qualificationStr, hourly_rate||null, teaching_mode||null, bio||null]
+        );
+      }
     } else if (role === 'school') {
       await db.query(
         'INSERT INTO schools (user_id, institute_name, institute_type, est_year, student_count, website) VALUES (?,?,?,?,?,?)',
         [userId, name, institute_type || null, est_year || null, student_count || null, website || null]
       );
     } else if (role === 'parent') {
-      await db.query(
-        `INSERT INTO parents (user_id, student_name, student_class, board, subject, location, mode,
-           preferred_time, budget, tutor_gender_pref, experience_req, notes)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [userId, student_name || null, student_class || null, board || null,
-         parentSubject || null, location || null, mode || null, preferred_time || null,
-         budget || null, tutor_gender_pref || null, experience_req || null, notes || null]
-      );
+      const { parent_pincode, parent_state, parent_landmark, hourly_budget, institute_name } = req.body;
+      await ensureParentColumns();
+      try {
+        await db.query(
+          `INSERT INTO parents (user_id, student_name, student_class, board, subject, location, mode,
+             preferred_time, budget, tutor_gender_pref, experience_req, notes,
+             pincode, state, landmark, hourly_budget, institute_name)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [userId, student_name || null, student_class || null, board || null,
+           parentSubject || null, location || null, mode || null, preferred_time || null,
+           budget || null, tutor_gender_pref || null, experience_req || null, notes || null,
+           parent_pincode || null, parent_state || null, parent_landmark || null,
+           hourly_budget || null, institute_name || null]
+        );
+      } catch (e) {
+        console.error('[signup parent] rich insert failed, using fallback:', e.message);
+        await db.query(
+          `INSERT INTO parents (user_id, student_name, student_class, board, subject, location, mode,
+             preferred_time, budget, tutor_gender_pref, experience_req, notes)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [userId, student_name || null, student_class || null, board || null,
+           parentSubject || null, location || null, mode || null, preferred_time || null,
+           budget || null, tutor_gender_pref || null, experience_req || null, notes || null]
+        );
+      }
     }
 
     await db.query('DELETE FROM otps WHERE email = ? AND type = ?', [email, 'signup']);

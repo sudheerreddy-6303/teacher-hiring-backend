@@ -21,6 +21,16 @@ router.get ('/analytics',       auth(['admin']),  c.getAnalytics);
 router.patch('/jobs/:id',       auth(['admin']),  c.updateJob);
 router.patch('/users/:id/toggle', auth(['admin']), c.toggleUser);
 
+// ── Admin: add new records ────────────────────────────────────────────────────
+router.post('/teachers',        auth(['admin']),  c.createTeacher);
+router.patch('/teachers/:id',   auth(['admin']),  c.updateTeacher);
+router.post('/tutors',          auth(['admin']),  c.createTutor);
+router.patch('/tutors/:id',     auth(['admin']),  c.updateTutor);
+router.patch('/schools/:id',    auth(['admin']),  c.updateSchool);
+router.patch('/parents/:id',    auth(['admin']),  c.updateParent);
+router.post('/tuitions',        auth(['admin']),  c.createTuition);
+router.post('/jobs',            auth(['admin']),  c.createAdminJob);
+
 // Tutors list for parents (approved parents only)
 router.get ('/tutors-list',     auth(['parent']), c.getTutorsForParent);
 

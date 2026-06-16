@@ -226,6 +226,20 @@ async function setupDatabase() {
     console.log('✅  Teachers table ready');
   } catch (err) { console.error('⚠️  Teachers migration:', err.message); }
 
+  // Tutors table — extra fields (multi subjects/qualifications, address, resume, etc.)
+  try {
+    for (const [col, def] of [
+      ['subjects','TEXT'], ['qualifications','TEXT'],
+      ['address','VARCHAR(300)'], ['location','VARCHAR(200)'], ['pincode','VARCHAR(20)'],
+      ['availability','VARCHAR(200)'], ['class_link','VARCHAR(500)'],
+      ['resume_link','VARCHAR(500)'], ['resume_file_name','VARCHAR(300)'],
+    ]) await addCol('tutors', col, def);
+    // Widen so the joined multi-select values fit
+    try { await db.query('ALTER TABLE `tutors` MODIFY COLUMN `subject` VARCHAR(255)'); } catch {}
+    try { await db.query('ALTER TABLE `tutors` MODIFY COLUMN `qualification` VARCHAR(255)'); } catch {}
+    console.log('✅  Tutors table ready');
+  } catch (err) { console.error('⚠️  Tutors migration:', err.message); }
+
   // Applications table
   try {
     await db.query(`
