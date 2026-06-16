@@ -17,6 +17,27 @@ async function ensureTutorGenderColumn() {
   _tutorGenderReady = true;
 }
 
+// Make sure the extra parent columns exist (runs once, lazily) so admin views
+// can fetch and save the full parent registration details.
+let _parentColsReady = false;
+async function ensureParentColumns() {
+  if (_parentColsReady) return;
+  const cols = [
+    ['pincode', 'VARCHAR(20)'], ['state', 'VARCHAR(100)'], ['landmark', 'VARCHAR(300)'],
+    ['hourly_budget', 'VARCHAR(50)'], ['institute_name', 'VARCHAR(300)'],
+  ];
+  for (const [col, def] of cols) {
+    try {
+      const [rows] = await db.query(
+        `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='parents' AND COLUMN_NAME=?`,
+        [col]
+      );
+      if (!rows.length) await db.query(`ALTER TABLE parents ADD COLUMN \`${col}\` ${def}`);
+    } catch (e) { /* ignore */ }
+  }
+  _parentColsReady = true;
+}
+
 // Helper: create a base user row for an admin-added teacher/tutor/parent.
 async function insertUser({ name, email, phone, city, role, password }) {
   const [[exists]] = await db.query('SELECT id FROM users WHERE email = ?', [email]);
@@ -117,11 +138,13 @@ async function getSchools(req, res) {
 
 async function getParents(req, res) {
   try {
+    await ensureParentColumns();
     const [rows] = await db.query(`
       SELECT u.id, u.name, u.email, u.phone, u.city, u.is_active, u.created_at,
              p.student_name, p.student_class, p.board, p.subject,
              p.location, p.mode, p.preferred_time, p.budget,
-             p.tutor_gender_pref, p.experience_req, p.status, p.assigned_tutor, p.notes
+             p.tutor_gender_pref, p.experience_req, p.status, p.assigned_tutor, p.notes,
+             p.state, p.pincode, p.landmark, p.hourly_budget, p.institute_name
       FROM users u LEFT JOIN parents p ON p.user_id=u.id
       WHERE u.role='parent' ORDER BY u.created_at DESC
     `);
@@ -512,6 +535,7 @@ async function updateParent(req, res) {
     }
 
     // Update the tuition requirement (status / assigned_tutor are left untouched).
+    await ensureParentColumns();
     const fields = {
       student_name:      b.student_name || null,
       student_class:     b.student_class || null,
@@ -524,6 +548,11 @@ async function updateParent(req, res) {
       tutor_gender_pref: b.tutor_gender_pref || null,
       experience_req:    b.experience_req || null,
       notes:             b.notes || null,
+      state:             b.state || null,
+      pincode:           b.pincode || null,
+      landmark:          b.landmark || null,
+      hourly_budget:     b.hourly_budget || null,
+      institute_name:    b.institute_name || null,
     };
     const keys = Object.keys(fields);
     const setClause = keys.map(k => `\`${k}\` = ?`).join(', ');
