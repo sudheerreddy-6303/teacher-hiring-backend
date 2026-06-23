@@ -128,6 +128,11 @@ async function setupDatabase() {
 
   try { await db.query(`ALTER TABLE users MODIFY COLUMN role ENUM('teacher','tutor','school','admin','parent') NOT NULL`); } catch {}
 
+  // Widen jobs.requirement_type from the old ENUM('Teacher','Faculty','Tutor') to VARCHAR(50)
+  // so non-teaching profiles (Principal, Vice Principal, Academic Counsellor, etc.) can be saved.
+  // Non-destructive: existing values are preserved.
+  try { await db.query(`ALTER TABLE jobs MODIFY COLUMN requirement_type VARCHAR(50) DEFAULT 'Teacher'`); } catch {}
+
   // ── Create/update admin account ──────────────────────────────────────────
   try {
     const bcrypt = require('bcryptjs');

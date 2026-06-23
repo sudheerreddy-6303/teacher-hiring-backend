@@ -44,6 +44,7 @@ async function ensureParentColumns() {
   const cols = [
     ['pincode', 'VARCHAR(20)'], ['state', 'VARCHAR(100)'], ['landmark', 'VARCHAR(300)'],
     ['hourly_budget', 'VARCHAR(50)'], ['institute_name', 'VARCHAR(300)'],
+    ['courses', 'VARCHAR(255)'], ['preferred_days', 'VARCHAR(255)'],
   ];
   for (const [col, def] of cols) {
     try {
@@ -157,18 +158,19 @@ async function signup(req, res) {
       );
     } else if (role === 'parent') {
       const { parent_pincode, parent_state, parent_landmark, hourly_budget, institute_name } = req.body;
+      const { courses, preferred_days } = req.body;
       await ensureParentColumns();
       try {
         await db.query(
           `INSERT INTO parents (user_id, student_name, student_class, board, subject, location, mode,
              preferred_time, budget, tutor_gender_pref, experience_req, notes,
-             pincode, state, landmark, hourly_budget, institute_name)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+             pincode, state, landmark, hourly_budget, institute_name, courses, preferred_days)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
           [userId, student_name || null, student_class || null, board || null,
            parentSubject || null, location || null, mode || null, preferred_time || null,
            budget || null, tutor_gender_pref || null, experience_req || null, notes || null,
            parent_pincode || null, parent_state || null, parent_landmark || null,
-           hourly_budget || null, institute_name || null]
+           hourly_budget || null, institute_name || null, courses || null, preferred_days || null]
         );
       } catch (e) {
         console.error('[signup parent] rich insert failed, using fallback:', e.message);

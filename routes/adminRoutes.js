@@ -7,6 +7,8 @@ const c      = require('../controllers/adminController');
 router.get ('/public/teachers',  c.getTeachers);
 router.get ('/public/tutors',    c.getTutors);
 router.get ('/public/tuitions',  c.getTuitions);
+router.get ('/public/schools',   c.getSchools);
+router.get ('/public/parents',   c.getParents);
 
 // ── Admin-only routes ─────────────────────────────────────────────────────────
 router.get ('/stats',           auth(['admin']),  c.getStats);

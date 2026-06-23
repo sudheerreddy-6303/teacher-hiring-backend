@@ -25,6 +25,7 @@ async function ensureParentColumns() {
   const cols = [
     ['pincode', 'VARCHAR(20)'], ['state', 'VARCHAR(100)'], ['landmark', 'VARCHAR(300)'],
     ['hourly_budget', 'VARCHAR(50)'], ['institute_name', 'VARCHAR(300)'],
+    ['courses', 'VARCHAR(255)'], ['preferred_days', 'VARCHAR(255)'],
   ];
   for (const [col, def] of cols) {
     try {
@@ -58,7 +59,8 @@ async function getStats(req, res) {
     const [[aj]] = await db.query("SELECT COUNT(*) AS c FROM jobs WHERE status='approved'");
     const [[pj]] = await db.query("SELECT COUNT(*) AS c FROM jobs WHERE status='pending'");
     const [[ap]] = await db.query("SELECT COUNT(*) AS c FROM applications");
-    res.json({ teachers: t.c, tutors: tu.c, schools: s.c, activeJobs: aj.c, pendingJobs: pj.c, totalApplications: ap.c });
+    const [[pa]] = await db.query("SELECT COUNT(*) AS c FROM users WHERE role='parent'");
+    res.json({ teachers: t.c, tutors: tu.c, schools: s.c, activeJobs: aj.c, pendingJobs: pj.c, totalApplications: ap.c, parents: pa.c });
   } catch (err) { res.status(500).json({ message: 'Error fetching stats.' }); }
 }
 
@@ -144,7 +146,8 @@ async function getParents(req, res) {
              p.student_name, p.student_class, p.board, p.subject,
              p.location, p.mode, p.preferred_time, p.budget,
              p.tutor_gender_pref, p.experience_req, p.status, p.assigned_tutor, p.notes,
-             p.state, p.pincode, p.landmark, p.hourly_budget, p.institute_name
+             p.state, p.pincode, p.landmark, p.hourly_budget, p.institute_name,
+             p.courses, p.preferred_days
       FROM users u LEFT JOIN parents p ON p.user_id=u.id
       WHERE u.role='parent' ORDER BY u.created_at DESC
     `);
@@ -239,7 +242,18 @@ async function getAnalytics(req, res) {
     const [jobTrend]   = await db.query(`SELECT DATE(created_at) AS date, status, COUNT(*) AS count FROM jobs WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) GROUP BY DATE(created_at), status ORDER BY date ASC`);
     const [topSubjects]= await db.query(`SELECT subject, COUNT(*) AS count FROM jobs WHERE subject IS NOT NULL AND subject != '' GROUP BY subject ORDER BY count DESC LIMIT 8`);
     const [topCities]  = await db.query(`SELECT city, COUNT(*) AS count FROM users WHERE city IS NOT NULL AND city != '' AND role='teacher' GROUP BY city ORDER BY count DESC LIMIT 8`);
-    res.json({ regTrend, jobTrend, topSubjects, topCities });
+    // ── Monthly trends (all-time) used by the overview cumulative charts so the
+    //    graph's running total matches the all-time totals shown on the stat cards. ──
+    const [regTrendMonthly] = await db.query(`SELECT DATE_FORMAT(created_at, '%Y-%m') AS ym, role, COUNT(*) AS count FROM users GROUP BY ym, role ORDER BY ym ASC`);
+    const [jobTrendMonthly] = await db.query(`SELECT DATE_FORMAT(created_at, '%Y-%m') AS ym, COUNT(*) AS count FROM jobs GROUP BY ym ORDER BY ym ASC`);
+    // ── Last-30-days day-wise trends + all-time totals. The overview charts seed
+    //    the cumulative line with (total − 30-day additions) so the line ends at
+    //    the all-time total shown on the stat cards. ──
+    const [regTrend30] = await db.query(`SELECT DATE(created_at) AS date, role, COUNT(*) AS count FROM users WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 29 DAY) GROUP BY DATE(created_at), role ORDER BY date ASC`);
+    const [jobTrend30] = await db.query(`SELECT DATE(created_at) AS date, COUNT(*) AS count FROM jobs WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 29 DAY) GROUP BY DATE(created_at) ORDER BY date ASC`);
+    const [regTotals]  = await db.query(`SELECT role, COUNT(*) AS count FROM users GROUP BY role`);
+    const [[jobTotalRow]] = await db.query(`SELECT COUNT(*) AS count FROM jobs`);
+    res.json({ regTrend, jobTrend, topSubjects, topCities, regTrendMonthly, jobTrendMonthly, regTrend30, jobTrend30, regTotals, jobTotal: jobTotalRow.count });
   } catch (err) { res.status(500).json({ message: 'Error fetching analytics: ' + err.message }); }
 }
 
@@ -553,6 +567,8 @@ async function updateParent(req, res) {
       landmark:          b.landmark || null,
       hourly_budget:     b.hourly_budget || null,
       institute_name:    b.institute_name || null,
+      courses:           b.courses || null,
+      preferred_days:    b.preferred_days || null,
     };
     const keys = Object.keys(fields);
     const setClause = keys.map(k => `\`${k}\` = ?`).join(', ');
@@ -574,16 +590,33 @@ async function createTuition(req, res) {
   try {
     const { name, email, phone, city, student_name, student_class, board, subject,
             location, mode, preferred_time, budget, tutor_gender_pref, experience_req, notes, password } = req.body;
+    const { courses, preferred_days } = req.body;
+    const { state, pincode, landmark, institute_name, hourly_budget } = req.body;
     if (!name || !email) return res.status(400).json({ message: 'Parent name and email are required.' });
     const userId = await insertUser({ name, email, phone, city, role: 'parent', password });
-    await db.query(
-      `INSERT INTO parents (user_id, student_name, student_class, board, subject, location, mode,
-         preferred_time, budget, tutor_gender_pref, experience_req, notes)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [userId, student_name||null, student_class||null, board||null, subject||null,
-       location||city||null, mode||null, preferred_time||null, budget||null,
-       tutor_gender_pref||null, experience_req||null, notes||null]
-    );
+    await ensureParentColumns();
+    try {
+      await db.query(
+        `INSERT INTO parents (user_id, student_name, student_class, board, subject, location, mode,
+           preferred_time, budget, tutor_gender_pref, experience_req, notes, courses, preferred_days,
+           state, pincode, landmark, institute_name, hourly_budget)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [userId, student_name||null, student_class||null, board||null, subject||null,
+         location||city||null, mode||null, preferred_time||null, budget||null,
+         tutor_gender_pref||null, experience_req||null, notes||null, courses||null, preferred_days||null,
+         state||null, pincode||null, landmark||null, institute_name||null, hourly_budget||null]
+      );
+    } catch (e) {
+      console.error('[createTuition] rich insert failed, using fallback:', e.message);
+      await db.query(
+        `INSERT INTO parents (user_id, student_name, student_class, board, subject, location, mode,
+           preferred_time, budget, tutor_gender_pref, experience_req, notes)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [userId, student_name||null, student_class||null, board||null, subject||null,
+         location||city||null, mode||null, preferred_time||null, budget||null,
+         tutor_gender_pref||null, experience_req||null, notes||null]
+      );
+    }
     res.status(201).json({ message: 'Tuition requirement added successfully.', id: userId });
   } catch (err) { res.status(err.status || 500).json({ message: err.message || 'Error adding tuition.' }); }
 }
