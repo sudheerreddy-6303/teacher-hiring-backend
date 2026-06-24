@@ -13,6 +13,7 @@ const teacherRoutes = require('./routes/teacherRoutes');
 const jobRoutes     = require('./routes/jobRoutes');
 const adminRoutes   = require('./routes/adminRoutes');
 const feedbackRoutes = require('./routes/feedbackRoutes');
+const enterpriseLeadRoutes = require('./routes/enterpriseLeadRoutes');
 
 const app = express();
 
@@ -69,6 +70,7 @@ app.use('/api/auth',    authRoutes);
 app.use('/api/teacher', teacherRoutes);
 app.use('/api/jobs',    jobRoutes);
 app.use('/api/feedback', feedbackRoutes);
+app.use('/api/contact-sales', enterpriseLeadRoutes);
 app.use('/api',         jobRoutes);
 app.use('/api/admin',   adminRoutes);
 
