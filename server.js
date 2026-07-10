@@ -4,6 +4,8 @@ require('dotenv').config();
 const express  = require('express');
 const cors     = require('cors');
 const path     = require('path');
+const https    = require('https');
+const fs       = require('fs');
 
 const db           = require('./config/db');
 const { mailer, EMAIL_CONFIGURED } = require('./config/mailer');
@@ -89,7 +91,27 @@ app.use((err, req, res, _next) => {
 const PORT = Number(process.env.PORT) || 5000;
 
 // Start server FIRST — respond to health checks immediately
-const server = app.listen(PORT, '0.0.0.0', () => {
+let server;
+
+// Check if HTTPS certificates are available (Railway provides them)
+const certPath = process.env.RAILWAY_CERT_PATH || '/etc/railway/certs/cert.pem';
+const keyPath = process.env.RAILWAY_KEY_PATH || '/etc/railway/certs/key.pem';
+
+if (fs.existsSync(certPath) && fs.existsSync(keyPath)) {
+  // Use HTTPS if certificates are available
+  const options = {
+    cert: fs.readFileSync(certPath),
+    key: fs.readFileSync(keyPath),
+  };
+  server = https.createServer(options, app);
+  console.log('🔒 HTTPS enabled');
+} else {
+  // Fallback to HTTP
+  server = app;
+  console.log('⚠️  HTTPS certificates not found, using HTTP');
+}
+
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n🚀  AcadHr API running on port ${PORT}`);
   console.log(`   NODE_ENV : ${process.env.NODE_ENV || 'development'}`);
   console.log(`   DB_HOST  : ${process.env.DB_HOST || process.env.MYSQLHOST || 'localhost'}`);
@@ -198,7 +220,7 @@ async function setupDatabase() {
       ['location_city','VARCHAR(100)'],['contact_person','VARCHAR(150)'],
       ['contact_number','VARCHAR(20)'],['contact_email','VARCHAR(255)'],
       ["requirement_type","VARCHAR(50) DEFAULT 'Teacher'"],['grades','VARCHAR(300)'],
-      ['board','VARCHAR(100)'],["joining_timeline","VARCHAR(50) DEFAULT 'Immediate'"],
+      ['board','VARCHAR(100)'],[\"joining_timeline\",\"VARCHAR(50) DEFAULT 'Immediate'\"],
       ["work_mode","VARCHAR(50) DEFAULT 'Full-time'"],["residential","VARCHAR(10) DEFAULT 'No'"],
       ["accommodation","VARCHAR(50) DEFAULT 'Not Provided'"],
       ["gender_preference","VARCHAR(50) DEFAULT 'No Preference'"],
@@ -224,7 +246,7 @@ async function setupDatabase() {
       ['demo_link','VARCHAR(500)'],['residential_pref','VARCHAR(10)'],
       ['relocation_ready','VARCHAR(10)'],['accommodation_req','VARCHAR(10)'],
       ['aadhaar_verified','VARCHAR(10)'],['resume_link','VARCHAR(500)'],
-      ['resume_file_name','VARCHAR(300)'],["profile_status","VARCHAR(20) DEFAULT 'Active'"],
+      ['resume_file_name','VARCHAR(300)'],[\"profile_status\",\"VARCHAR(20) DEFAULT 'Active'\"],
       ['remarks','TEXT'],['completion_pct','INT DEFAULT 0'],['profile_photo','VARCHAR(500)'],
       ['terms_accepted',"VARCHAR(10) DEFAULT 'No'"],
     ]) await addCol('teachers', col, def);
@@ -297,3 +319,4 @@ async function setupDatabase() {
   }
   console.log('✅  Database setup complete\n');
 }
+
