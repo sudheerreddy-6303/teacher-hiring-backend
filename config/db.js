@@ -15,9 +15,19 @@ const db = mysql.createPool({
   timezone:           '+05:30',
   connectTimeout:     30000,      // 30s timeout for Railway cold starts
   ssl:                process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
+  // ── ADDED (fix #3): overnight idle-disconnect protection ──────────────────
+  enableKeepAlive:       true,    // TCP keep-alive so idle connections aren't silently dropped
+  keepAliveInitialDelay: 10000,   // start keep-alive pings 10s after connect
+  maxIdle:               2,       // keep at most 2 idle connections overnight
+  idleTimeout:           60000,   // retire connections idle >60s (before MySQL/Railway kills them)
+  // ── END ADDED ──────────────────────────────────────────────────────────────
 });
 
 // Log connection errors
 db.on('connection', () => console.log('✅  MySQL connected'));
+
+// ── ADDED (fix #3): log pool-level errors instead of failing silently ────────
+db.on('error', (err) => console.error('❌  MySQL pool error:', err.code, err.message));
+// ── END ADDED ─────────────────────────────────────────────────────────────────
 
 module.exports = db;

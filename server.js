@@ -1,6 +1,11 @@
 'use strict';
 require('dotenv').config();
 
+// ── ADDED (fix #12): crash guards — log unexpected errors instead of dying ───
+process.on('unhandledRejection', (err) => console.error('❌ Unhandled rejection:', err));
+process.on('uncaughtException',  (err) => console.error('❌ Uncaught exception:', err));
+// ── END ADDED ─────────────────────────────────────────────────────────────────
+
 const express  = require('express');
 const cors     = require('cors');
 const path     = require('path');
@@ -48,8 +53,9 @@ async function healthHandler(req, res) {
   try {
     await db.query('SELECT 1');
     res.json({ status: 'ok', db: 'connected', time: new Date() });
-  } catch {
-    res.json({ status: 'ok', db: 'connecting', time: new Date() });
+  } catch (err) {
+    // ── CHANGED (fix #11): report real failure (HTTP 500) so monitoring can detect DB outages ──
+    res.status(500).json({ status: 'error', db: 'disconnected', error: err.code || err.message, time: new Date() });
   }
 }
 
