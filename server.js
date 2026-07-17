@@ -142,12 +142,18 @@ async function setupDatabase() {
   try { await db.query(`ALTER TABLE jobs MODIFY COLUMN requirement_type VARCHAR(50) DEFAULT 'Teacher'`); } catch {}
 
   // ── Create/update admin account ──────────────────────────────────────────
+  // CHANGED (fix #2): credentials now come from environment variables instead of
+  // being hardcoded. Set ADMIN_EMAIL + ADMIN_PASSWORD in Railway → backend → Variables.
+  // If they are not set, this step is safely skipped — all other logic unchanged.
   try {
     const bcrypt = require('bcryptjs');
-    const ADMIN_EMAIL = 'acadhire01@gmail.com';
-    const ADMIN_PASS  = 'acadhire@2026';
-    const ADMIN_NAME  = 'AcadHr Admin';
+    const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
+    const ADMIN_PASS  = process.env.ADMIN_PASSWORD;
+    const ADMIN_NAME  = process.env.ADMIN_NAME || 'AcadHr Admin';
 
+    if (!ADMIN_EMAIL || !ADMIN_PASS) {
+      console.log('ℹ️  Admin setup skipped — set ADMIN_EMAIL + ADMIN_PASSWORD env vars to enable.');
+    } else {
     const [[existing]] = await db.query('SELECT id FROM users WHERE email = ?', [ADMIN_EMAIL]);
     if (existing) {
       // Update password and ensure role is admin
@@ -164,6 +170,7 @@ async function setupDatabase() {
         [ADMIN_NAME, ADMIN_EMAIL, hash, 'admin']
       );
       console.log('✅  Admin account created:', ADMIN_EMAIL);
+    }
     }
   } catch (err) { console.error('⚠️  Admin setup:', err.message); }
   try {

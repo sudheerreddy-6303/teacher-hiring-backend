@@ -4,11 +4,17 @@ const auth   = require('../middleware/auth');
 const c      = require('../controllers/adminController');
 
 // ── Public routes (no auth needed) ───────────────────────────────────────────
-router.get ('/public/teachers',  c.getTeachers);
-router.get ('/public/tutors',    c.getTutors);
+// CHANGED (fix #1): public routes now use the safe functions (no email/phone/
+// salary/DOB/remarks). Original lines kept below as comments for reference.
+// router.get ('/public/teachers',  c.getTeachers);
+// router.get ('/public/tutors',    c.getTutors);
+// router.get ('/public/schools',   c.getSchools);
+// router.get ('/public/parents',   c.getParents);
+router.get ('/public/teachers',  c.getPublicTeachers);
+router.get ('/public/tutors',    c.getPublicTutors);
 router.get ('/public/tuitions',  c.getTuitions);
-router.get ('/public/schools',   c.getSchools);
-router.get ('/public/parents',   c.getParents);
+router.get ('/public/schools',   c.getPublicSchools);
+router.get ('/public/parents',   c.getPublicParents);
 
 // ── Admin-only routes ─────────────────────────────────────────────────────────
 router.get ('/stats',           auth(['admin']),  c.getStats);
@@ -35,5 +41,12 @@ router.post('/jobs',            auth(['admin']),  c.createAdminJob);
 
 // Tutors list for parents (approved parents only)
 router.get ('/tutors-list',     auth(['parent']), c.getTutorsForParent);
+
+// ADDED: teacher database with contact info for logged-in schools (View Contact)
+router.get ('/school/teachers', auth(['school']), c.getTeachersForSchool);
+
+// ADDED: parent contact credits (5 free on signup; server-side balance)
+router.get ('/parent/credits',    auth(['parent']), c.getParentCredits);
+router.post('/parent/use-credit', auth(['parent']), c.useParentCredit);
 
 module.exports = router;

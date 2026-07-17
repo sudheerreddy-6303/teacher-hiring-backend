@@ -668,4 +668,165 @@ async function createAdminJob(req, res) {
   } catch (err) { res.status(err.status || 500).json({ message: err.message || 'Error adding job.' }); }
 }
 
-module.exports = { getStats, getAllUsers, getTeachers, getTutors, getSchools, getParents, getAllJobs, getPendingJobs, updateJob, toggleUser, getAnalytics, getTutorsForParent, getTuitions, createTeacher, updateTeacher, createTutor, updateTutor, updateSchool, updateParent, createTuition, createAdminJob };
+// ═══════════════════════════════════════════════════════════════════════════
+// ADDED (fix #1): PUBLIC-SAFE versions of the listing endpoints.
+// These return ONLY display-safe fields for the public website (no email, no
+// phone/mobile, no DOB, no salaries, no admin remarks). The original full-data
+// functions above are untouched and remain admin-only.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// GET /api/admin/public/teachers — safe fields only
+async function getPublicTeachers(req, res) {
+  try {
+    const [rows] = await db.query(`
+      SELECT u.id, u.name, u.city, u.is_active, u.created_at,
+             t.specialization, t.total_experience, t.qualification, t.current_role,
+             t.profile_status, t.completion_pct, t.profile_photo,
+             t.subjects, t.languages, t.work_mode, t.gender, t.current_location,
+             t.grades_handling, t.boards_handled,
+             t.full_name, t.preferred_locations, t.relevant_experience,
+             t.current_org, t.certifications, t.tutor_type, t.competitive_exams,
+             t.teaching_mode, t.demo_available, t.demo_link,
+             t.residential_pref, t.relocation_ready, t.accommodation_req
+      FROM users u LEFT JOIN teachers t ON t.user_id=u.id
+      WHERE u.role='teacher' AND u.is_active=1 ORDER BY u.created_at DESC
+    `);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ message: 'Error fetching teachers: ' + err.message }); }
+}
+
+// GET /api/admin/public/tutors — safe fields only
+async function getPublicTutors(req, res) {
+  try {
+    await ensureTutorGenderColumn();
+    let rows;
+    try {
+      [rows] = await db.query(`
+        SELECT u.id, u.name, u.city, u.is_active, u.created_at,
+               t.subject, t.subjects, t.experience, t.qualification, t.qualifications,
+               t.teaching_mode, t.hourly_rate, t.bio, t.location,
+               t.availability, t.gender
+        FROM users u LEFT JOIN tutors t ON t.user_id=u.id
+        WHERE u.role='tutor' AND u.is_active=1 ORDER BY u.created_at DESC
+      `);
+    } catch (e) {
+      // gender column may not exist yet on older databases — fall back without it
+      [rows] = await db.query(`
+        SELECT u.id, u.name, u.city, u.is_active, u.created_at,
+               t.subject, t.subjects, t.experience, t.qualification, t.qualifications,
+               t.teaching_mode, t.hourly_rate, t.bio, t.location,
+               t.availability
+        FROM users u LEFT JOIN tutors t ON t.user_id=u.id
+        WHERE u.role='tutor' AND u.is_active=1 ORDER BY u.created_at DESC
+      `);
+    }
+    res.json(rows);
+  } catch (err) { res.status(500).json({ message: 'Error fetching tutors: ' + err.message }); }
+}
+
+// GET /api/admin/public/schools — safe fields only
+async function getPublicSchools(req, res) {
+  try {
+    const [rows] = await db.query(`
+      SELECT u.id, u.name, u.city, u.is_active, u.created_at,
+             s.institute_name, s.institute_type, s.est_year, s.student_count, s.website,
+             (SELECT COUNT(*) FROM jobs j WHERE j.posted_by=u.id) AS total_jobs,
+             (SELECT COUNT(*) FROM jobs j WHERE j.posted_by=u.id AND j.status='approved') AS live_jobs,
+             (SELECT COUNT(*) FROM jobs j WHERE j.posted_by=u.id AND j.status='pending') AS pending_jobs
+      FROM users u LEFT JOIN schools s ON s.user_id=u.id
+      WHERE u.role='school' AND u.is_active=1 ORDER BY u.created_at DESC
+    `);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ message: 'Error fetching schools: ' + err.message }); }
+}
+
+// GET /api/admin/public/parents — safe fields only
+async function getPublicParents(req, res) {
+  try {
+    await ensureParentColumns();
+    const [rows] = await db.query(`
+      SELECT u.id, u.name, u.city, u.is_active, u.created_at,
+             p.student_name, p.student_class, p.board, p.subject,
+             p.location, p.mode, p.preferred_time, p.budget,
+             p.tutor_gender_pref, p.experience_req, p.status,
+             p.hourly_budget, p.institute_name, p.courses, p.preferred_days
+      FROM users u LEFT JOIN parents p ON p.user_id=u.id
+      WHERE u.role='parent' AND u.is_active=1 ORDER BY u.created_at DESC
+    `);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ message: 'Error fetching parents: ' + err.message }); }
+}
+
+// GET /api/admin/school/teachers — for LOGGED-IN schools only (auth ['school']).
+// ADDED: same safe fields as public, PLUS contact info (email, phone, mobile) so the
+// School dashboard's "View Contact" works. Salaries, DOB and remarks stay admin-only.
+async function getTeachersForSchool(req, res) {
+  try {
+    const [rows] = await db.query(`
+      SELECT u.id, u.name, u.city, u.is_active, u.created_at,
+             u.email, u.phone,
+             t.mobile,
+             t.specialization, t.total_experience, t.qualification, t.current_role,
+             t.profile_status, t.completion_pct, t.profile_photo,
+             t.subjects, t.languages, t.work_mode, t.gender, t.current_location,
+             t.grades_handling, t.boards_handled,
+             t.full_name, t.preferred_locations, t.relevant_experience,
+             t.current_org, t.certifications, t.tutor_type, t.competitive_exams,
+             t.teaching_mode, t.demo_available, t.demo_link,
+             t.residential_pref, t.relocation_ready, t.accommodation_req,
+             t.resume_link, t.resume_file_name
+      FROM users u LEFT JOIN teachers t ON t.user_id=u.id
+      WHERE u.role='teacher' AND u.is_active=1 ORDER BY u.created_at DESC
+    `);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ message: 'Error fetching teachers: ' + err.message }); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ADDED (parent credits): every parent starts with 5 free tutor contacts.
+// Server-side check so the balance cannot be bypassed from the browser.
+// ═══════════════════════════════════════════════════════════════════════════
+let _parentCreditsReady = false;
+async function ensureParentCreditsColumn() {
+  if (_parentCreditsReady) return;
+  try {
+    const [rows] = await db.query(
+      `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='parents' AND COLUMN_NAME='credits'`
+    );
+    if (!rows.length) await db.query("ALTER TABLE parents ADD COLUMN `credits` INT DEFAULT 5");
+  } catch (e) { /* ignore */ }
+  _parentCreditsReady = true;
+}
+
+// GET /api/admin/parent/credits — remaining contact credits for the logged-in parent
+async function getParentCredits(req, res) {
+  try {
+    await ensureParentCreditsColumn();
+    const [[row]] = await db.query('SELECT COALESCE(credits, 5) AS credits FROM parents WHERE user_id = ?', [req.user.id]);
+    res.json({ credits: row ? row.credits : 5 });
+  } catch (err) { res.status(500).json({ message: 'Error fetching credits: ' + err.message }); }
+}
+
+// POST /api/admin/parent/use-credit — spend 1 credit to unlock a tutor contact
+async function useParentCredit(req, res) {
+  try {
+    await ensureParentCreditsColumn();
+    let [[row]] = await db.query('SELECT COALESCE(credits, 5) AS credits FROM parents WHERE user_id = ?', [req.user.id]);
+    if (!row) {
+      await db.query('INSERT INTO parents (user_id, credits) VALUES (?, 5)', [req.user.id]);
+      row = { credits: 5 };
+    }
+    // ── TEMPORARILY DISABLED (per Seshu, 17-Jul-2026): the 5-tutor contact limit
+    // for parents is switched OFF. Parents can now open unlimited tutor profiles.
+    // To re-enable the limit later, uncomment the block below and remove the
+    // temporary res.json line at the end.
+    // if (row.credits <= 0) {
+    //   return res.status(402).json({ message: 'No credits left. Please upgrade to continue contacting tutors.', credits: 0 });
+    // }
+    // await db.query('UPDATE parents SET credits = COALESCE(credits, 5) - 1 WHERE user_id = ?', [req.user.id]);
+    // res.json({ credits: row.credits - 1 });
+    res.json({ credits: row.credits }); // limit disabled: no credit deducted, never blocks
+  } catch (err) { res.status(500).json({ message: 'Error using credit: ' + err.message }); }
+}
+
+module.exports = { getStats, getAllUsers, getTeachers, getTutors, getSchools, getParents, getAllJobs, getPendingJobs, updateJob, toggleUser, getAnalytics, getTutorsForParent, getTuitions, createTeacher, updateTeacher, createTutor, updateTutor, updateSchool, updateParent, createTuition, createAdminJob, getPublicTeachers, getPublicTutors, getPublicSchools, getPublicParents, getTeachersForSchool, getParentCredits, useParentCredit };
