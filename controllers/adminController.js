@@ -17,6 +17,20 @@ async function ensureTutorGenderColumn() {
   _tutorGenderReady = true;
 }
 
+// ADDED: make sure the approval column exists before public/admin queries filter on it,
+// so listings never error out (and older tutors without a status stay visible).
+let _tutorStatusReady = false;
+async function ensureTutorProfileStatusColumn() {
+  if (_tutorStatusReady) return;
+  try {
+    const [rows] = await db.query(
+      `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tutors' AND COLUMN_NAME='profile_status'`
+    );
+    if (!rows.length) await db.query("ALTER TABLE tutors ADD COLUMN `profile_status` VARCHAR(30)");
+  } catch (e) { /* ignore */ }
+  _tutorStatusReady = true;
+}
+
 // Make sure the extra parent columns exist (runs once, lazily) so admin views
 // can fetch and save the full parent registration details.
 let _parentColsReady = false;
@@ -98,13 +112,14 @@ async function getTeachers(req, res) {
 async function getTutors(req, res) {
   try {
     await ensureTutorGenderColumn();
+    await ensureTutorProfileStatusColumn();
     let rows;
     try {
       [rows] = await db.query(`
         SELECT u.id, u.name, u.email, u.phone, u.city, u.is_active, u.created_at,
                t.subject, t.subjects, t.experience, t.qualification, t.qualifications,
                t.teaching_mode, t.hourly_rate, t.bio, t.address, t.location, t.pincode,
-               t.availability, t.class_link, t.resume_link, t.resume_file_name, t.gender
+               t.availability, t.class_link, t.resume_link, t.resume_file_name, t.gender, t.profile_status
         FROM users u LEFT JOIN tutors t ON t.user_id=u.id
         WHERE u.role='tutor' ORDER BY u.created_at DESC
       `);
@@ -114,7 +129,7 @@ async function getTutors(req, res) {
         SELECT u.id, u.name, u.email, u.phone, u.city, u.is_active, u.created_at,
                t.subject, t.subjects, t.experience, t.qualification, t.qualifications,
                t.teaching_mode, t.hourly_rate, t.bio, t.address, t.location, t.pincode,
-               t.availability, t.class_link, t.resume_link, t.resume_file_name
+               t.availability, t.class_link, t.resume_link, t.resume_file_name, t.profile_status
         FROM users u LEFT JOIN tutors t ON t.user_id=u.id
         WHERE u.role='tutor' ORDER BY u.created_at DESC
       `);
@@ -699,6 +714,7 @@ async function getPublicTeachers(req, res) {
 async function getPublicTutors(req, res) {
   try {
     await ensureTutorGenderColumn();
+    await ensureTutorProfileStatusColumn();
     let rows;
     try {
       [rows] = await db.query(`
@@ -708,7 +724,7 @@ async function getPublicTutors(req, res) {
                t.availability, t.gender
         FROM users u LEFT JOIN tutors t ON t.user_id=u.id
         WHERE u.role='tutor' AND u.is_active=1
-          AND (t.profile_status IS NULL OR t.profile_status IN ('Active','Approved'))
+          AND (t.profile_status IS NULL OR t.profile_status NOT IN ('Pending','Inactive'))
         ORDER BY u.created_at DESC
       `);
     } catch (e) {
@@ -720,7 +736,7 @@ async function getPublicTutors(req, res) {
                t.availability
         FROM users u LEFT JOIN tutors t ON t.user_id=u.id
         WHERE u.role='tutor' AND u.is_active=1
-          AND (t.profile_status IS NULL OR t.profile_status IN ('Active','Approved'))
+          AND (t.profile_status IS NULL OR t.profile_status NOT IN ('Pending','Inactive'))
         ORDER BY u.created_at DESC
       `);
     }
