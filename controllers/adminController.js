@@ -707,7 +707,9 @@ async function getPublicTutors(req, res) {
                t.teaching_mode, t.hourly_rate, t.bio, t.location,
                t.availability, t.gender
         FROM users u LEFT JOIN tutors t ON t.user_id=u.id
-        WHERE u.role='tutor' AND u.is_active=1 ORDER BY u.created_at DESC
+        WHERE u.role='tutor' AND u.is_active=1
+          AND (t.profile_status IS NULL OR t.profile_status IN ('Active','Approved'))
+        ORDER BY u.created_at DESC
       `);
     } catch (e) {
       // gender column may not exist yet on older databases — fall back without it
@@ -717,7 +719,9 @@ async function getPublicTutors(req, res) {
                t.teaching_mode, t.hourly_rate, t.bio, t.location,
                t.availability
         FROM users u LEFT JOIN tutors t ON t.user_id=u.id
-        WHERE u.role='tutor' AND u.is_active=1 ORDER BY u.created_at DESC
+        WHERE u.role='tutor' AND u.is_active=1
+          AND (t.profile_status IS NULL OR t.profile_status IN ('Active','Approved'))
+        ORDER BY u.created_at DESC
       `);
     }
     res.json(rows);

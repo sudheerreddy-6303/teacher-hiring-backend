@@ -22,6 +22,15 @@ async function ensureTutorColumns() {
     ['availability', 'VARCHAR(200)'], ['class_link', 'VARCHAR(500)'],
     ['resume_link', 'VARCHAR(500)'], ['resume_file_name', 'VARCHAR(300)'],
     ['gender', 'VARCHAR(20)'],
+    // ADDED: tutor photo, classes taught (max 3), state & country
+    ['photo_link', 'VARCHAR(500)'], ['photo_file_name', 'VARCHAR(300)'],
+    ['classes_taught', 'VARCHAR(300)'], ['state', 'VARCHAR(100)'], ['country', 'VARCHAR(100)'],
+    // ADDED: courses dropdown, demo class link (YouTube/Instagram), about yourself (~300 words)
+    ['tutor_courses', 'VARCHAR(255)'], ['demo_class_link', 'VARCHAR(500)'], ['about_yourself', 'TEXT'],
+    // ADDED: tutor terms & conditions acceptance flag
+    ['terms_accepted', 'TINYINT(1)'],
+    // ADDED: admin approval gate for public visibility (Pending until admin approves)
+    ['profile_status', 'VARCHAR(30)'],
   ];
   for (const [col, def] of cols) {
     try {
@@ -114,10 +123,18 @@ async function signup(req, res) {
       // Extra tutor fields (multi-selects arrive as arrays; resume as base64)
       const { subjects, qualifications, availability, address, tutor_location,
               pincode, class_link, resume_base64, resume_name, resume_type, gender } = req.body;
+      // ADDED: new tutor signup fields — photo, classes taught, state, country
+      const { tutor_photo_base64, tutor_photo_name, tutor_photo_type, classes_taught, state, country } = req.body;
+      // ADDED: courses dropdown, demo class link, about-yourself (~300 words)
+      const { tutor_courses, demo_class_link, about_yourself } = req.body;
+      // ADDED: tutor terms & conditions acceptance
+      const { tutor_terms_accepted } = req.body;
       const join = v => Array.isArray(v) ? v.filter(Boolean).join(', ') : (v || '');
       const subjectStr       = join(subjects)       || subject       || null;
       const qualificationStr = join(qualifications) || qualification || null;
       const availabilityStr  = join(availability)   || null;
+      // ADDED: classes can arrive as array or comma string; cap at 3
+      const classesStr = join(classes_taught).split(',').map(s => s.trim()).filter(Boolean).slice(0, 3).join(', ') || null;
 
       // Optional resume upload → store bytes in file_blobs, keep a link on the tutor row
       let resumeLink = null, resumeFileName = null;
@@ -132,17 +149,34 @@ async function signup(req, res) {
         } catch (e) { console.error('[signup tutor resume]', e.message); }
       }
 
+      // ADDED: optional tutor photo upload → store bytes in file_blobs, keep a link on the tutor row
+      let photoLink = null, photoFileName = null;
+      if (tutor_photo_base64) {
+        try {
+          const pbuf  = Buffer.from(String(tutor_photo_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+          const psafe = (tutor_photo_name || 'photo.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
+          const pfname = `tutorphoto_${userId}_${Date.now()}_${psafe}`;
+          await saveBlob(userId, 'photo', pfname, tutor_photo_type || 'image/jpeg', pbuf);
+          photoFileName = tutor_photo_name || psafe;
+          photoLink = `/uploads/photos/${pfname}`;
+        } catch (e) { console.error('[signup tutor photo]', e.message); }
+      }
+
       // Rich insert (new columns); fall back to the original columns if a column is missing
       await ensureTutorColumns();
       try {
         await db.query(
           `INSERT INTO tutors (user_id, subject, subjects, experience, qualification, qualifications,
              hourly_rate, teaching_mode, bio, address, location, pincode, availability, class_link,
-             resume_link, resume_file_name, gender)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+             resume_link, resume_file_name, gender,
+             photo_link, photo_file_name, classes_taught, state, country,
+             tutor_courses, demo_class_link, about_yourself, terms_accepted, profile_status)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
           [userId, subjectStr, join(subjects)||null, experience||null, qualificationStr, join(qualifications)||null,
            hourly_rate||null, teaching_mode||null, bio||null, address||null, tutor_location||null, pincode||null,
-           availabilityStr, class_link||null, resumeLink, resumeFileName, gender||null]
+           availabilityStr, class_link||null, resumeLink, resumeFileName, gender||null,
+           photoLink, photoFileName, classesStr, state||null, country||null,
+           join(tutor_courses)||null, demo_class_link||null, about_yourself||null, (tutor_terms_accepted ? 1 : 0), 'Pending']
         );
       } catch (e) {
         console.error('[signup tutor] rich insert failed, using fallback:', e.message);

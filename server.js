@@ -19,6 +19,7 @@ const jobRoutes     = require('./routes/jobRoutes');
 const adminRoutes   = require('./routes/adminRoutes');
 const feedbackRoutes = require('./routes/feedbackRoutes');
 const enterpriseLeadRoutes = require('./routes/enterpriseLeadRoutes');
+const tutorRoutes   = require('./routes/tutorRoutes'); // ADDED: tutor tuitions database + apply
 
 const app = express();
 
@@ -34,7 +35,7 @@ app.use(cors({
 }));
 app.options('*', cors()); // handle pre-flight for all routes
 
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '25mb' })); // ADDED: raised from 10mb so tutor resume + photo (base64) both fit
 app.use(express.urlencoded({ extended: true }));
 
 // ── Static uploads ────────────────────────────────────────────────────────────
@@ -74,6 +75,7 @@ app.get('/api/health', healthHandler);
 // ── Routes ────────────────────────────────────────────────────────────────────
 app.use('/api/auth',    authRoutes);
 app.use('/api/teacher', teacherRoutes);
+app.use('/api/tutor',   tutorRoutes); // ADDED: tutor tuitions database + apply
 app.use('/api/jobs',    jobRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/contact-sales', enterpriseLeadRoutes);
