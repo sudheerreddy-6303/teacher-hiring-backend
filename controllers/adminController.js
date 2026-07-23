@@ -461,6 +461,9 @@ async function updateTutor(req, res) {
       await db.query('UPDATE users SET password=? WHERE id=?', [hash, userId]);
     }
 
+    // ADDED: make sure the approval column exists before we try to write to it.
+    await ensureTutorProfileStatusColumn();
+
     // The multi-selects (subjects / qualifications / availability) arrive as comma strings.
     const subjectStr = b.subjects || b.subject || null;
     const qualStr    = b.qualifications || b.qualification || null;
@@ -478,24 +481,89 @@ async function updateTutor(req, res) {
       class_link: b.class_link || null,
       resume_link: b.resume_link || null,
       resume_file_name: b.resume_file_name || null,
+      // ADDED: admin approval. The "✓ Approve" button in the Tutors table and the
+      // tutor modal's "Save Changes" both send profile_status; it was missing from
+      // this list, so the value was accepted and silently never written.
+      profile_status: b.profile_status || null,
     };
-    const keys = Object.keys(fields);
+
+    // ADDED: track which columns the caller actually sent.
+    // The "✓ Approve" button sends ONLY { profile_status:"Active" }. Because every
+    // key above falls back to null, that single click used to overwrite the tutor's
+    // subject / experience / resume / bio with NULL. Now only the columns present in
+    // the request body are written — everything else is left exactly as it is.
+    const sent = {
+      subject:          b.subject          !== undefined || b.subjects       !== undefined,
+      subjects:         b.subjects         !== undefined,
+      experience:       b.experience       !== undefined,
+      qualification:    b.qualification    !== undefined || b.qualifications !== undefined,
+      qualifications:   b.qualifications   !== undefined,
+      hourly_rate:      b.hourly_rate      !== undefined,
+      teaching_mode:    b.teaching_mode    !== undefined,
+      bio:              b.bio              !== undefined,
+      address:          b.address          !== undefined,
+      location:         b.location         !== undefined || b.tutor_location !== undefined,
+      pincode:          b.pincode          !== undefined,
+      availability:     b.availability     !== undefined,
+      class_link:       b.class_link       !== undefined,
+      resume_link:      b.resume_link      !== undefined,
+      resume_file_name: b.resume_file_name !== undefined,
+      profile_status:   b.profile_status   !== undefined,
+    };
+
+    const allKeys = Object.keys(fields);
+    // ADDED: only the sent columns go into the UPDATE.
+    const keys = allKeys.filter(k => sent[k]);
     const setClause = keys.map(k => `\`${k}\` = ?`).join(', ');
     const vals = keys.map(k => fields[k]);
     vals.push(userId);
     try {
-      const [result] = await db.query(`UPDATE tutors SET ${setClause} WHERE user_id = ?`, vals);
+      // ADDED: nothing to change means nothing to write (still a success response).
+      const [result] = keys.length
+        ? await db.query(`UPDATE tutors SET ${setClause} WHERE user_id = ?`, vals)
+        : await db.query('SELECT user_id FROM tutors WHERE user_id = ?', [userId]).then(([r]) => [{ affectedRows: r.length }]);
       if (result.affectedRows === 0) {
+        // No tutors row yet — insert the full set, exactly as before.
         await db.query(
-          `INSERT INTO tutors (user_id, ${keys.map(k => `\`${k}\``).join(', ')})
-           VALUES (${['?', ...keys.map(() => '?')].join(', ')})`,
-          [userId, ...keys.map(k => fields[k])]
+          `INSERT INTO tutors (user_id, ${allKeys.map(k => `\`${k}\``).join(', ')})
+           VALUES (${['?', ...allKeys.map(() => '?')].join(', ')})`,
+          [userId, ...allKeys.map(k => fields[k])]
         );
       }
     } catch (e) {
       // Fallback to the minimal columns if the extended tutor schema isn't present.
-      await db.query('UPDATE tutors SET subject=?, experience=?, qualification=?, hourly_rate=?, teaching_mode=?, bio=? WHERE user_id=?',
-        [subjectStr, b.experience||null, qualStr, b.hourly_rate||null, b.teaching_mode||'Both', b.bio||null, userId]);
+      // ADDED: only use the original full-column fallback when the caller really did
+      // send the whole profile (the tutor modal does). An approve-only request takes
+      // the partial path below so it cannot blank these columns either.
+      const minimalKeys = ['subject', 'experience', 'qualification', 'hourly_rate', 'teaching_mode', 'bio'];
+      if (minimalKeys.every(k => sent[k])) {
+        await db.query('UPDATE tutors SET subject=?, experience=?, qualification=?, hourly_rate=?, teaching_mode=?, bio=? WHERE user_id=?',
+          [subjectStr, b.experience||null, qualStr, b.hourly_rate||null, b.teaching_mode||'Both', b.bio||null, userId]);
+      } else {
+        // ADDED: partial minimal-schema update.
+        const minimal = {
+          subject: subjectStr,
+          experience: b.experience || null,
+          qualification: qualStr,
+          hourly_rate: b.hourly_rate || null,
+          teaching_mode: b.teaching_mode || 'Both',
+          bio: b.bio || null,
+        };
+        const minSent = minimalKeys.filter(k => sent[k]);
+        if (minSent.length) {
+          await db.query(
+            `UPDATE tutors SET ${minSent.map(k => `\`${k}\` = ?`).join(', ')} WHERE user_id = ?`,
+            [...minSent.map(k => minimal[k]), userId]
+          );
+        }
+      }
+      // ADDED: write the approval status on its own so a missing extended column
+      // elsewhere can never swallow the approval.
+      if (sent.profile_status) {
+        try {
+          await db.query('UPDATE tutors SET profile_status=? WHERE user_id=?', [b.profile_status || null, userId]);
+        } catch (e2) { /* column genuinely absent — ignore */ }
+      }
     }
     res.json({ message: 'Tutor updated successfully.' });
   } catch (err) { res.status(err.status || 500).json({ message: err.message || 'Error updating tutor.' }); }
