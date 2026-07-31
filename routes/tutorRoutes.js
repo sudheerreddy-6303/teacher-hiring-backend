@@ -8,4 +8,9 @@ router.get ('/tuitions',                 auth(['tutor']), c.listTuitions);
 router.get ('/tuition-applications',     auth(['tutor']), c.myTuitionApplications);
 router.post('/tuitions/:parentId/apply', auth(['tutor']), c.applyTuition);
 
+// ADDED: My Videos — tutor intro/demo videos (link or uploaded file)
+router.get   ('/videos',      auth(['tutor']), c.listVideos);
+router.post  ('/videos',      auth(['tutor']), c.addVideo);
+router.delete('/videos/:id',  auth(['tutor']), c.deleteVideo);
+
 module.exports = router;

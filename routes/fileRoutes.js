@@ -6,5 +6,6 @@ const c      = require('../controllers/fileController');
 // otherwise the file is streamed from the database).
 router.get('/photos/:filename',  c.serveByFilename);
 router.get('/resumes/:filename', c.serveByFilename);
+router.get('/videos/:filename',  c.serveByFilename); // ADDED: tutor My Videos uploads
 
 module.exports = router;

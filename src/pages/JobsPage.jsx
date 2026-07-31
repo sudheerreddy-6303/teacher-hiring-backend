@@ -81,6 +81,7 @@ function JobsPage({ setPage }) {
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-end", marginBottom:16 }}>
             <div>
               <h1 style={{ fontSize:30, fontWeight:900, color:"#111827", marginBottom:5 }}>Browse Teaching Jobs</h1>
+              {/* CHANGED (per request): total/live/pending job count numbers removed. Original kept below:
               <p style={{ color:"#6B7280", fontSize:14 }}>
                 {loading ? "Loading from acadhr.jobs..." : (
                   <>
@@ -90,6 +91,7 @@ function JobsPage({ setPage }) {
                   </>
                 )}
               </p>
+              */}
             </div>
             {user?.role === "school" && (
               <button className="btn btn-primary" onClick={() => setPage("dashboard")}>+ Post a Job</button>
@@ -155,9 +157,11 @@ function JobsPage({ setPage }) {
           </div>
         ) : (
           <>
+            {/* CHANGED (per request): "Showing X of Y jobs" count removed. Original kept below:
             <div style={{ fontSize:13, color:"#6B7280", marginBottom:20 }}>
               Showing <strong style={{ color:"#111827" }}>{filtered.length}</strong> of <strong style={{ color:"#111827" }}>{jobs.length}</strong> jobs
             </div>
+            */}
 
             <div className="grid3">
               {filtered.map(job => {

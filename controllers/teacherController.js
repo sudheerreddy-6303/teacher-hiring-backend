@@ -31,6 +31,11 @@ async function ensureTutorColumns() {
     ['subjects', 'TEXT'], ['qualifications', 'TEXT'],
     ['address', 'VARCHAR(300)'], ['location', 'VARCHAR(200)'], ['pincode', 'VARCHAR(20)'],
     ['availability', 'VARCHAR(200)'], ['class_link', 'VARCHAR(500)'], ['gender', 'VARCHAR(20)'],
+    // ADDED: columns collected at signup that the tutor dashboard now shows and saves.
+    ['photo_link', 'VARCHAR(500)'], ['photo_file_name', 'VARCHAR(300)'],
+    ['classes_taught', 'VARCHAR(300)'], ['state', 'VARCHAR(100)'], ['country', 'VARCHAR(100)'],
+    ['tutor_courses', 'VARCHAR(255)'], ['demo_class_link', 'VARCHAR(500)'], ['about_yourself', 'TEXT'],
+    ['terms_accepted', 'TINYINT(1)'],
   ];
   for (const [col, def] of cols) {
     try {
@@ -164,6 +169,34 @@ async function updateGeneralProfile(req, res) {
     if (role === 'tutor') {
       const { subject, subjects, experience, qualification, qualifications, bio, hourly_rate, teaching_mode,
               availability, address, location, pincode, class_link, gender } = req.body;
+      // ADDED: fields collected at signup that the tutor dashboard's My Profile now edits.
+      // They were never destructured here, so anything the tutor typed into them was dropped.
+      const { classes_taught, state, country, tutor_courses, demo_class_link, about_yourself } = req.body;
+      // ADDED: let a tutor replace their photo / resume from the dashboard.
+      // Same base64 → file_blobs flow the signup form already uses.
+      const { tutor_photo_base64, tutor_photo_name, tutor_photo_type,
+              resume_base64, resume_name, resume_type } = req.body;
+      let photoLink = null, photoFileName = null, resumeLink = null, resumeFileName = null;
+      if (tutor_photo_base64) {
+        try {
+          const pbuf   = Buffer.from(String(tutor_photo_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+          const psafe  = (tutor_photo_name || 'photo.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
+          const pfname = `tutorphoto_${req.user.id}_${Date.now()}_${psafe}`;
+          await saveBlob(req.user.id, 'photo', pfname, tutor_photo_type || 'image/jpeg', pbuf);
+          photoFileName = tutor_photo_name || psafe;
+          photoLink     = `/uploads/photos/${pfname}`;
+        } catch (e) { console.error('[updateGeneralProfile tutor photo]', e.message); }
+      }
+      if (resume_base64) {
+        try {
+          const rbuf   = Buffer.from(String(resume_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+          const rsafe  = (resume_name || 'resume').replace(/[^a-zA-Z0-9._-]/g, '_');
+          const rfname = `tutor_${req.user.id}_${Date.now()}_${rsafe}`;
+          await saveBlob(req.user.id, 'resume', rfname, resume_type || 'application/octet-stream', rbuf);
+          resumeFileName = resume_name || rsafe;
+          resumeLink     = `/uploads/resumes/${rfname}`;
+        } catch (e) { console.error('[updateGeneralProfile tutor resume]', e.message); }
+      }
       await ensureTutorColumns();
       // Guarantee a tutors row exists (user_id is UNIQUE) so the UPDATE below always applies
       try { await db.query('INSERT IGNORE INTO tutors (user_id) VALUES (?)', [req.user.id]); } catch (e) { /* ignore */ }
@@ -175,14 +208,34 @@ async function updateGeneralProfile(req, res) {
             hourly_rate=COALESCE(?,hourly_rate), teaching_mode=COALESCE(?,teaching_mode),
             availability=COALESCE(?,availability), address=COALESCE(?,address),
             location=COALESCE(?,location), pincode=COALESCE(?,pincode),
-            class_link=COALESCE(?,class_link), gender=COALESCE(?,gender) WHERE user_id=?`,
+            class_link=COALESCE(?,class_link), gender=COALESCE(?,gender),
+            classes_taught=COALESCE(?,classes_taught), state=COALESCE(?,state),
+            country=COALESCE(?,country), tutor_courses=COALESCE(?,tutor_courses),
+            demo_class_link=COALESCE(?,demo_class_link), about_yourself=COALESCE(?,about_yourself),
+            photo_link=COALESCE(?,photo_link), photo_file_name=COALESCE(?,photo_file_name),
+            resume_link=COALESCE(?,resume_link), resume_file_name=COALESCE(?,resume_file_name)
+            WHERE user_id=?`,
           [subject||null, subjects||null, experience||null, qualification||null, qualifications||null, bio||null,
            hourly_rate||null, teaching_mode||null, availability||null, address||null, location||null,
-           pincode||null, class_link||null, gender||null, req.user.id]);
+           pincode||null, class_link||null, gender||null,
+           classes_taught||null, state||null, country||null, tutor_courses||null,
+           demo_class_link||null, about_yourself||null,
+           photoLink, photoFileName, resumeLink, resumeFileName, req.user.id]);
       } catch (e) {
         console.error('[updateGeneralProfile tutor] rich update failed, using fallback:', e.message);
         await db.query('UPDATE tutors SET subject=COALESCE(?,subject), experience=COALESCE(?,experience), qualification=COALESCE(?,qualification), bio=COALESCE(?,bio), hourly_rate=COALESCE(?,hourly_rate), teaching_mode=COALESCE(?,teaching_mode) WHERE user_id=?',
           [subject||null, experience||null, qualification||null, bio||null, hourly_rate||null, teaching_mode||null, req.user.id]);
+        // ADDED: the fallback above only covers the original six columns. Write the newer
+        // ones separately and individually so one missing column can't lose the rest.
+        for (const [col, val] of [['classes_taught', classes_taught], ['state', state], ['country', country],
+                                  ['tutor_courses', tutor_courses], ['demo_class_link', demo_class_link],
+                                  ['about_yourself', about_yourself], ['gender', gender],
+                                  ['photo_link', photoLink], ['photo_file_name', photoFileName],
+                                  ['resume_link', resumeLink], ['resume_file_name', resumeFileName]]) {
+          if (val === undefined || val === null || val === '') continue;
+          try { await db.query(`UPDATE tutors SET \`${col}\`=? WHERE user_id=?`, [val, req.user.id]); }
+          catch (e2) { /* column not present — skip */ }
+        }
       }
     } else if (role === 'school') {
       const { institute_type, est_year, student_count, website } = req.body;
