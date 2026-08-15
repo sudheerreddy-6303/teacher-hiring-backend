@@ -789,7 +789,7 @@ async function getPublicTutors(req, res) {
         SELECT u.id, u.name, u.city, u.is_active, u.created_at,
                t.subject, t.subjects, t.experience, t.qualification, t.qualifications,
                t.teaching_mode, t.hourly_rate, t.bio, t.location,
-               t.availability, t.gender
+               t.availability, t.gender, t.classes_taught
         FROM users u LEFT JOIN tutors t ON t.user_id=u.id
         WHERE u.role='tutor' AND u.is_active=1
           AND (t.profile_status IS NULL OR t.profile_status NOT IN ('Pending','Inactive'))
