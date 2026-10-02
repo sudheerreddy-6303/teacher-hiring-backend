@@ -190,6 +190,18 @@ async function signup(req, res) {
         'INSERT INTO schools (user_id, institute_name, institute_type, est_year, student_count, website) VALUES (?,?,?,?,?,?)',
         [userId, name, institute_type || null, est_year || null, student_count || null, website || null]
       );
+      // ADDED: also store the state (and city) at signup so "Post a Job" can auto-fill them.
+      const { state: schoolState } = req.body;
+      for (const [col, def, val] of [['state', 'VARCHAR(100)', schoolState], ['city', 'VARCHAR(100)', city]]) {
+        try {
+          const [c] = await db.query(
+            "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='schools' AND COLUMN_NAME=?",
+            [col]
+          );
+          if (!c.length) await db.query(`ALTER TABLE schools ADD COLUMN \`${col}\` ${def}`);
+          if (val) await db.query(`UPDATE schools SET \`${col}\`=? WHERE user_id=?`, [val, userId]);
+        } catch (e) { /* non-fatal */ }
+      }
     } else if (role === 'parent') {
       const { parent_pincode, parent_state, parent_landmark, hourly_budget, institute_name } = req.body;
       const { courses, preferred_days } = req.body;

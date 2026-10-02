@@ -275,12 +275,27 @@ async function getAnalytics(req, res) {
 async function getTutorsForParent(req, res) {
   try {
     const { subject, city } = req.query;
-    let q = `SELECT u.id, u.name, u.city, u.phone, u.email, t.subject, t.experience, t.qualification, t.teaching_mode, t.hourly_rate, t.bio FROM users u LEFT JOIN tutors t ON t.user_id=u.id WHERE u.role='tutor' AND u.is_active=1`;
+    // CHANGED (additive): also select subjects, qualifications, location, availability,
+    // gender and classes_taught so the parent "Find Tutors" card can show the full,
+    // richer layout. Original columns are all still here — nothing removed.
+    let q = `SELECT u.id, u.name, u.city, u.phone, u.email, t.subject, t.subjects, t.experience, t.qualification, t.qualifications, t.teaching_mode, t.hourly_rate, t.bio, t.location, t.availability, t.gender, t.classes_taught FROM users u LEFT JOIN tutors t ON t.user_id=u.id WHERE u.role='tutor' AND u.is_active=1`;
     const params = [];
     if (subject) { q += ' AND t.subject LIKE ?'; params.push(`%${subject}%`); }
     if (city)    { q += ' AND u.city LIKE ?';    params.push(`%${city}%`); }
     q += ' ORDER BY u.created_at DESC';
-    const [rows] = await db.query(q, params);
+    let rows;
+    try {
+      [rows] = await db.query(q, params);
+    } catch (e) {
+      // ADDED: older databases may not have some of the newer tutor columns
+      // (e.g. gender/classes_taught). Fall back to the original safe column set.
+      let q2 = `SELECT u.id, u.name, u.city, u.phone, u.email, t.subject, t.experience, t.qualification, t.teaching_mode, t.hourly_rate, t.bio FROM users u LEFT JOIN tutors t ON t.user_id=u.id WHERE u.role='tutor' AND u.is_active=1`;
+      const p2 = [];
+      if (subject) { q2 += ' AND t.subject LIKE ?'; p2.push(`%${subject}%`); }
+      if (city)    { q2 += ' AND u.city LIKE ?';    p2.push(`%${city}%`); }
+      q2 += ' ORDER BY u.created_at DESC';
+      [rows] = await db.query(q2, p2);
+    }
     res.json(rows);
   } catch (err) { res.status(500).json({ message: 'Error fetching tutors: ' + err.message }); }
 }
@@ -288,15 +303,37 @@ async function getTutorsForParent(req, res) {
 // Public tuition requirements posted by parents (no auth, no contact details exposed)
 async function getTuitions(req, res) {
   try {
-    const [rows] = await db.query(`
-      SELECT u.id, u.name, u.city AS user_city, u.created_at,
-             p.student_class, p.board, p.subject, p.location, p.mode,
-             p.preferred_time, p.budget, p.tutor_gender_pref, p.experience_req, p.status, p.notes
-      FROM parents p JOIN users u ON u.id = p.user_id
-      WHERE u.role='parent' AND u.is_active=1
-        AND (p.status IS NULL OR p.status <> 'Closed')
-      ORDER BY u.created_at DESC
-    `);
+    // CHANGED (additive): also include the parent's EXTRA tuition posts
+    // (parent_tuitions). Falls back to the original query if that table is absent.
+    let rows;
+    try {
+      [rows] = await db.query(`
+        SELECT u.id, u.name, u.city AS user_city, u.created_at,
+               p.student_class, p.board, p.subject, p.location, p.mode,
+               p.preferred_time, p.budget, p.tutor_gender_pref, p.experience_req, p.status, p.notes
+        FROM parents p JOIN users u ON u.id = p.user_id
+        WHERE u.role='parent' AND u.is_active=1
+          AND (p.status IS NULL OR p.status <> 'Closed')
+        UNION ALL
+        SELECT u.id, u.name, u.city AS user_city, pt.created_at,
+               pt.student_class, pt.board, pt.subject, pt.location, pt.mode,
+               pt.preferred_time, pt.budget, pt.tutor_gender_pref, pt.experience_req, pt.status, pt.notes
+        FROM parent_tuitions pt JOIN users u ON u.id = pt.parent_user_id
+        WHERE u.role='parent' AND u.is_active=1
+          AND (pt.status IS NULL OR pt.status <> 'Closed')
+        ORDER BY created_at DESC
+      `);
+    } catch (e) {
+      [rows] = await db.query(`
+        SELECT u.id, u.name, u.city AS user_city, u.created_at,
+               p.student_class, p.board, p.subject, p.location, p.mode,
+               p.preferred_time, p.budget, p.tutor_gender_pref, p.experience_req, p.status, p.notes
+        FROM parents p JOIN users u ON u.id = p.user_id
+        WHERE u.role='parent' AND u.is_active=1
+          AND (p.status IS NULL OR p.status <> 'Closed')
+        ORDER BY u.created_at DESC
+      `);
+    }
     res.json(rows);
   } catch (err) { res.status(500).json({ message: 'Error fetching tuitions: ' + err.message }); }
 }
@@ -871,8 +908,9 @@ async function getTeachersForSchool(req, res) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ADDED (parent credits): every parent starts with 5 free tutor contacts.
+// ADDED (parent credits): every parent starts with 20 free credits.
 // Server-side check so the balance cannot be bypassed from the browser.
+// (CHANGED per request: initial free credits 5 → 20. Existing rows keep their value.)
 // ═══════════════════════════════════════════════════════════════════════════
 let _parentCreditsReady = false;
 async function ensureParentCreditsColumn() {
@@ -881,7 +919,9 @@ async function ensureParentCreditsColumn() {
     const [rows] = await db.query(
       `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='parents' AND COLUMN_NAME='credits'`
     );
-    if (!rows.length) await db.query("ALTER TABLE parents ADD COLUMN `credits` INT DEFAULT 5");
+    if (!rows.length) await db.query("ALTER TABLE parents ADD COLUMN `credits` INT DEFAULT 20");
+    // keep the column default in sync for new rows (safe no-op if already 20)
+    try { await db.query("ALTER TABLE parents ALTER COLUMN `credits` SET DEFAULT 20"); } catch (e) {}
   } catch (e) { /* ignore */ }
   _parentCreditsReady = true;
 }
@@ -890,8 +930,8 @@ async function ensureParentCreditsColumn() {
 async function getParentCredits(req, res) {
   try {
     await ensureParentCreditsColumn();
-    const [[row]] = await db.query('SELECT COALESCE(credits, 5) AS credits FROM parents WHERE user_id = ?', [req.user.id]);
-    res.json({ credits: row ? row.credits : 5 });
+    const [[row]] = await db.query('SELECT COALESCE(credits, 20) AS credits FROM parents WHERE user_id = ?', [req.user.id]);
+    res.json({ credits: row ? row.credits : 20 });
   } catch (err) { res.status(500).json({ message: 'Error fetching credits: ' + err.message }); }
 }
 
@@ -899,10 +939,10 @@ async function getParentCredits(req, res) {
 async function useParentCredit(req, res) {
   try {
     await ensureParentCreditsColumn();
-    let [[row]] = await db.query('SELECT COALESCE(credits, 5) AS credits FROM parents WHERE user_id = ?', [req.user.id]);
+    let [[row]] = await db.query('SELECT COALESCE(credits, 20) AS credits FROM parents WHERE user_id = ?', [req.user.id]);
     if (!row) {
-      await db.query('INSERT INTO parents (user_id, credits) VALUES (?, 5)', [req.user.id]);
-      row = { credits: 5 };
+      await db.query('INSERT INTO parents (user_id, credits) VALUES (?, 20)', [req.user.id]);
+      row = { credits: 20 };
     }
     // ── TEMPORARILY DISABLED (per Seshu, 17-Jul-2026): the 5-tutor contact limit
     // for parents is switched OFF. Parents can now open unlimited tutor profiles.
@@ -913,8 +953,70 @@ async function useParentCredit(req, res) {
     // }
     // await db.query('UPDATE parents SET credits = COALESCE(credits, 5) - 1 WHERE user_id = ?', [req.user.id]);
     // res.json({ credits: row.credits - 1 });
-    res.json({ credits: row.credits }); // limit disabled: no credit deducted, never blocks
+    // res.json({ credits: row.credits }); // limit disabled: no credit deducted, never blocks
+
+    // ── RE-ENABLED (per Seshu, 30-Sep-2026): clicking "Contact Tutor" now spends 1
+    // credit. When credits reach 0 the request is blocked with 402 (upgrade popup).
+    const _have = Number(row.credits) || 0;
+    if (_have <= 0) {
+      return res.status(402).json({ message: 'No credits left. Please upgrade to continue contacting tutors.', credits: 0 });
+    }
+    await db.query('UPDATE parents SET credits = GREATEST(COALESCE(credits, 5) - 1, 0) WHERE user_id = ?', [req.user.id]);
+    const [[_r2]] = await db.query('SELECT COALESCE(credits, 0) AS credits FROM parents WHERE user_id = ?', [req.user.id]);
+    res.json({ credits: _r2 ? Number(_r2.credits) : Math.max(_have - 1, 0), charged: true });
   } catch (err) { res.status(500).json({ message: 'Error using credit: ' + err.message }); }
 }
 
-module.exports = { getStats, getAllUsers, getTeachers, getTutors, getSchools, getParents, getAllJobs, getPendingJobs, updateJob, toggleUser, getAnalytics, getTutorsForParent, getTuitions, createTeacher, updateTeacher, createTutor, updateTutor, updateSchool, updateParent, createTuition, createAdminJob, getPublicTeachers, getPublicTutors, getPublicSchools, getPublicParents, getTeachersForSchool, getParentCredits, useParentCredit };
+// ADDED: POST /api/admin/school/unlock-contact — a school spends 1 credit to view a
+// teacher's contact. Each teacher is charged only once per school (re-viewing is free).
+let _unlockTableReady = false;
+async function ensureUnlockTable() {
+  if (_unlockTableReady) return;
+  try {
+    await db.query(`CREATE TABLE IF NOT EXISTS school_contact_unlocks (
+      id            INT AUTO_INCREMENT PRIMARY KEY,
+      school_id     INT NOT NULL,
+      teacher_ref   VARCHAR(60) NOT NULL,
+      created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_school_teacher (school_id, teacher_ref)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+    _unlockTableReady = true;
+  } catch (e) { /* ignore */ }
+}
+
+async function unlockTeacherContact(req, res) {
+  try {
+    await ensureUnlockTable();
+    const schoolId = req.user.id;
+    const teacherRef = String((req.body && (req.body.teacher_id ?? req.body.teacherId)) || '').trim();
+    if (!teacherRef) return res.status(400).json({ message: 'Missing teacher id.' });
+
+    // Already unlocked before? → free, just return current balance.
+    let already = false;
+    try {
+      const [[u]] = await db.query('SELECT id FROM school_contact_unlocks WHERE school_id=? AND teacher_ref=?', [schoolId, teacherRef]);
+      already = !!u;
+    } catch (e) { /* table may be new */ }
+
+    const [[row]] = await db.query('SELECT COALESCE(credits,0) AS credits FROM users WHERE id=?', [schoolId]);
+    const credits = row ? Number(row.credits) : 0;
+
+    if (already) {
+      return res.json({ credits, charged: false, already: true });
+    }
+    if (credits < 1) {
+      return res.status(402).json({ message: 'You are out of credits. Please buy a plan from the Pricing tab to view teacher contacts.', credits: 0 });
+    }
+
+    // Deduct 1 credit and record the unlock (so it's charged only once per teacher).
+    await db.query('UPDATE users SET credits = GREATEST(COALESCE(credits,0) - 1, 0) WHERE id=?', [schoolId]);
+    try { await db.query('INSERT IGNORE INTO school_contact_unlocks (school_id, teacher_ref) VALUES (?,?)', [schoolId, teacherRef]); } catch (e) { /* ignore */ }
+
+    const [[r2]] = await db.query('SELECT COALESCE(credits,0) AS credits FROM users WHERE id=?', [schoolId]);
+    res.json({ credits: r2 ? Number(r2.credits) : Math.max(credits - 1, 0), charged: true });
+  } catch (err) {
+    res.status(500).json({ message: 'Error unlocking contact: ' + err.message });
+  }
+}
+
+module.exports = { getStats, getAllUsers, getTeachers, getTutors, getSchools, getParents, getAllJobs, getPendingJobs, updateJob, toggleUser, getAnalytics, getTutorsForParent, getTuitions, createTeacher, updateTeacher, createTutor, updateTutor, updateSchool, updateParent, createTuition, createAdminJob, getPublicTeachers, getPublicTutors, getPublicSchools, getPublicParents, getTeachersForSchool, getParentCredits, useParentCredit, unlockTeacherContact };

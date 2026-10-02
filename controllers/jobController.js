@@ -102,6 +102,19 @@ async function createJob(req, res) {
 
     if (!subject && !title) return res.status(400).json({ message: 'Subject or title required.' });
 
+    // ── Credits: posting one job costs 1 credit ──────────────────────────────
+    // Read the school's credit balance. If the credits column isn't ready yet
+    // (fresh install before the migration runs), skip enforcement rather than
+    // block posting, so this can never break an existing setup.
+    let credits = null;
+    try {
+      const [[row]] = await db.query('SELECT COALESCE(credits,0) AS credits FROM users WHERE id = ?', [req.user.id]);
+      credits = row ? Number(row.credits) : 0;
+    } catch (e) { credits = null; }
+    if (credits !== null && credits < 1) {
+      return res.status(402).json({ message: 'You need at least 1 credit to post a job. Please buy a plan from the Pricing tab to add credits.' });
+    }
+
     const requirement_id = await generateRequirementId();
     const jobTitle = title || `${requirement_type || 'Teacher'} — ${subject}`;
     const gradesStr = Array.isArray(grades) ? grades.join(',') : (grades || '');
@@ -131,7 +144,16 @@ async function createJob(req, res) {
       ]
     );
 
-    res.status(201).json({ message: 'Job submitted for review.', jobId: result.insertId, requirement_id });
+    // Deduct 1 credit for this posting (never below 0)
+    let creditsLeft;
+    if (credits !== null) {
+      try {
+        await db.query('UPDATE users SET credits = GREATEST(COALESCE(credits,0) - 1, 0) WHERE id = ?', [req.user.id]);
+        creditsLeft = Math.max(credits - 1, 0);
+      } catch (e) {}
+    }
+
+    res.status(201).json({ message: 'Job submitted for review.', jobId: result.insertId, requirement_id, credits_left: creditsLeft });
   } catch (err) {
     console.error('[createJob]', err);
     res.status(500).json({ message: 'Error posting job: ' + err.message });
@@ -163,6 +185,17 @@ async function applyJob(req, res) {
     );
     if (existing) return res.status(409).json({ message: 'Already applied to this job.' });
 
+    // ── Credits: applying to a job costs 1 credit ──────────────────────────────
+    // If the credits column isn't ready yet, skip enforcement rather than block.
+    let credits = null;
+    try {
+      const [[crow]] = await db.query('SELECT COALESCE(credits,0) AS credits FROM users WHERE id = ?', [req.user.id]);
+      credits = crow ? Number(crow.credits) : 0;
+    } catch (e) { credits = null; }
+    if (credits !== null && credits < 1) {
+      return res.status(402).json({ message: 'You need at least 1 credit to apply. Please buy a plan from the Pricing tab to add credits.' });
+    }
+
     // Try inserting with cover_note, fallback to cover_letter
     try {
       await db.query(
@@ -180,7 +213,16 @@ async function applyJob(req, res) {
       }
     }
 
-    res.status(201).json({ message: 'Application submitted successfully.' });
+    // Deduct 1 credit for this new application (never below 0)
+    let creditsLeft;
+    if (credits !== null) {
+      try {
+        await db.query('UPDATE users SET credits = GREATEST(COALESCE(credits,0) - 1, 0) WHERE id = ?', [req.user.id]);
+        creditsLeft = Math.max(credits - 1, 0);
+      } catch (e) {}
+    }
+
+    res.status(201).json({ message: 'Application submitted successfully.', credits_left: creditsLeft });
   } catch (err) {
     console.error('[applyJob]', err.message);
     // MySQL duplicate entry error = already applied

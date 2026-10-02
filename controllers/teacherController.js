@@ -10,6 +10,9 @@ async function ensureParentColumns() {
   const cols = [
     ['pincode', 'VARCHAR(20)'], ['state', 'VARCHAR(100)'], ['landmark', 'VARCHAR(300)'],
     ['hourly_budget', 'VARCHAR(50)'], ['institute_name', 'VARCHAR(300)'],
+    // ADDED: preferred time slot(s) for the tuition requirement. time_from holds one
+    // or more comma-separated hourly slots (e.g. "7-8 AM, 8-9 AM"), so it's wide.
+    ['time_from', 'VARCHAR(255)'], ['time_to', 'VARCHAR(255)'],
   ];
   for (const [col, def] of cols) {
     try {
@@ -20,6 +23,10 @@ async function ensureParentColumns() {
       if (!rows.length) await db.query(`ALTER TABLE parents ADD COLUMN \`${col}\` ${def}`);
     } catch (e) { /* ignore individual column errors */ }
   }
+  // ADDED: widen time_from/time_to if an older DB created them as VARCHAR(20),
+  // so multiple comma-separated slots fit. Safe no-op if already wide.
+  try { await db.query("ALTER TABLE parents MODIFY `time_from` VARCHAR(255)"); } catch (e) {}
+  try { await db.query("ALTER TABLE parents MODIFY `time_to` VARCHAR(255)"); } catch (e) {}
   _parentColsReady = true;
 }
 
@@ -49,6 +56,33 @@ async function ensureTutorColumns() {
   try { await db.query('ALTER TABLE tutors MODIFY COLUMN subject VARCHAR(255)'); } catch {}
   try { await db.query('ALTER TABLE tutors MODIFY COLUMN qualification VARCHAR(255)'); } catch {}
   _tutorColsReady = true;
+}
+
+// ADDED: Make sure the extra school columns exist (runs once, lazily, on first school profile update).
+// Same INFORMATION_SCHEMA pattern as ensureTutorColumns / ensureParentColumns above.
+let _schoolColsReady = false;
+async function ensureSchoolColumns() {
+  if (_schoolColsReady) return;
+  const cols = [
+    ['affiliation_board', 'VARCHAR(150)'], ['medium_of_instruction', 'VARCHAR(150)'],
+    ['classes_offered', 'VARCHAR(300)'], ['streams_available', 'VARCHAR(300)'],
+    ['principal_name', 'VARCHAR(200)'], ['total_teachers', 'VARCHAR(50)'],
+    ['non_teaching_staff', 'VARCHAR(50)'], ['infrastructure', 'TEXT'],
+    ['address', 'VARCHAR(400)'], ['state', 'VARCHAR(100)'], ['pincode', 'VARCHAR(20)'],
+    ['contact_person', 'VARCHAR(200)'], ['designation', 'VARCHAR(150)'],
+    ['alternate_phone', 'VARCHAR(30)'], ['description', 'TEXT'],
+    ['hiring_for', 'VARCHAR(300)'], ['social_media', 'VARCHAR(400)'],
+  ];
+  for (const [col, def] of cols) {
+    try {
+      const [rows] = await db.query(
+        `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='schools' AND COLUMN_NAME=?`,
+        [col]
+      );
+      if (!rows.length) await db.query(`ALTER TABLE schools ADD COLUMN \`${col}\` ${def}`);
+    } catch (e) { /* ignore individual column errors */ }
+  }
+  _schoolColsReady = true;
 }
 
 // GET /api/teacher/profile
@@ -238,12 +272,54 @@ async function updateGeneralProfile(req, res) {
         }
       }
     } else if (role === 'school') {
-      const { institute_type, est_year, student_count, website } = req.body;
-      await db.query('UPDATE schools SET institute_type=COALESCE(?,institute_type), est_year=COALESCE(?,est_year), student_count=COALESCE(?,student_count), website=COALESCE(?,website) WHERE user_id=?',
-        [institute_type||null, est_year||null, student_count||null, website||null, req.user.id]);
+      const { institute_name, institute_type, est_year, student_count, website,
+              affiliation_board, medium_of_instruction, classes_offered, streams_available,
+              principal_name, total_teachers, non_teaching_staff, infrastructure,
+              address, state, pincode, contact_person, designation, alternate_phone,
+              description, hiring_for, social_media } = req.body;
+      await ensureSchoolColumns();
+      // Guarantee a schools row exists (user_id is UNIQUE) so the UPDATE below always applies.
+      try { await db.query('INSERT IGNORE INTO schools (user_id) VALUES (?)', [req.user.id]); } catch (e) { /* ignore */ }
+      try {
+        await db.query(
+          `UPDATE schools SET institute_name=COALESCE(?,institute_name), institute_type=COALESCE(?,institute_type),
+            est_year=COALESCE(?,est_year), student_count=COALESCE(?,student_count), website=COALESCE(?,website),
+            affiliation_board=COALESCE(?,affiliation_board), medium_of_instruction=COALESCE(?,medium_of_instruction),
+            classes_offered=COALESCE(?,classes_offered), streams_available=COALESCE(?,streams_available),
+            principal_name=COALESCE(?,principal_name), total_teachers=COALESCE(?,total_teachers),
+            non_teaching_staff=COALESCE(?,non_teaching_staff), infrastructure=COALESCE(?,infrastructure),
+            address=COALESCE(?,address), state=COALESCE(?,state), pincode=COALESCE(?,pincode),
+            contact_person=COALESCE(?,contact_person), designation=COALESCE(?,designation),
+            alternate_phone=COALESCE(?,alternate_phone), description=COALESCE(?,description),
+            hiring_for=COALESCE(?,hiring_for), social_media=COALESCE(?,social_media)
+            WHERE user_id=?`,
+          [institute_name||null, institute_type||null, est_year||null, student_count||null, website||null,
+           affiliation_board||null, medium_of_instruction||null, classes_offered||null, streams_available||null,
+           principal_name||null, total_teachers||null, non_teaching_staff||null, infrastructure||null,
+           address||null, state||null, pincode||null, contact_person||null, designation||null, alternate_phone||null,
+           description||null, hiring_for||null, social_media||null, req.user.id]);
+      } catch (e) {
+        console.error('[updateGeneralProfile school] rich update failed, using fallback:', e.message);
+        // Fallback: original four columns only, so one missing column can't lose the rest.
+        await db.query('UPDATE schools SET institute_type=COALESCE(?,institute_type), est_year=COALESCE(?,est_year), student_count=COALESCE(?,student_count), website=COALESCE(?,website) WHERE user_id=?',
+          [institute_type||null, est_year||null, student_count||null, website||null, req.user.id]);
+        // Then write the newer columns one-by-one so a single missing column is skipped, not fatal.
+        for (const [col, val] of [['institute_name', institute_name], ['affiliation_board', affiliation_board],
+                                  ['medium_of_instruction', medium_of_instruction], ['classes_offered', classes_offered],
+                                  ['streams_available', streams_available], ['principal_name', principal_name],
+                                  ['total_teachers', total_teachers], ['non_teaching_staff', non_teaching_staff],
+                                  ['infrastructure', infrastructure], ['address', address], ['state', state],
+                                  ['pincode', pincode], ['contact_person', contact_person], ['designation', designation],
+                                  ['alternate_phone', alternate_phone], ['description', description],
+                                  ['hiring_for', hiring_for], ['social_media', social_media]]) {
+          if (val === undefined || val === null || val === '') continue;
+          try { await db.query(`UPDATE schools SET \`${col}\`=? WHERE user_id=?`, [val, req.user.id]); }
+          catch (e2) { /* column not present — skip */ }
+        }
+      }
     } else if (role === 'parent') {
       const { student_name, student_class, board, subject, location, mode, preferred_time, budget, tutor_gender_pref, experience_req, notes,
-              state, pincode, landmark, hourly_budget, institute_name } = req.body;
+              state, pincode, landmark, hourly_budget, institute_name, time_from, time_to } = req.body;
       await ensureParentColumns();
       try {
         await db.query(
@@ -253,10 +329,12 @@ async function updateGeneralProfile(req, res) {
             tutor_gender_pref=COALESCE(?,tutor_gender_pref), experience_req=COALESCE(?,experience_req),
             notes=COALESCE(?,notes), state=COALESCE(?,state), pincode=COALESCE(?,pincode),
             landmark=COALESCE(?,landmark), hourly_budget=COALESCE(?,hourly_budget),
-            institute_name=COALESCE(?,institute_name) WHERE user_id=?`,
+            institute_name=COALESCE(?,institute_name), time_from=COALESCE(?,time_from),
+            time_to=COALESCE(?,time_to) WHERE user_id=?`,
           [student_name||null, student_class||null, board||null, subject||null, location||null,
            mode||null, preferred_time||null, budget||null, tutor_gender_pref||null, experience_req||null, notes||null,
-           state||null, pincode||null, landmark||null, hourly_budget||null, institute_name||null, req.user.id]
+           state||null, pincode||null, landmark||null, hourly_budget||null, institute_name||null,
+           time_from||null, time_to||null, req.user.id]
         );
       } catch (e) {
         console.error('[updateGeneralProfile parent] rich update failed, using fallback:', e.message);

@@ -20,6 +20,9 @@ const adminRoutes   = require('./routes/adminRoutes');
 const feedbackRoutes = require('./routes/feedbackRoutes');
 const enterpriseLeadRoutes = require('./routes/enterpriseLeadRoutes');
 const tutorRoutes   = require('./routes/tutorRoutes'); // ADDED: tutor tuitions database + apply
+const paymentRoutes = require('./routes/paymentRoutes'); // ADDED: payments (Razorpay)
+const bannerRoutes  = require('./routes/bannerRoutes'); // ADDED: admin-managed banners
+const parentTuitionRoutes = require('./routes/parentTuitionRoutes'); // ADDED: parent multiple tuition posts
 
 const app = express();
 
@@ -81,6 +84,9 @@ app.use('/api/feedback', feedbackRoutes);
 app.use('/api/contact-sales', enterpriseLeadRoutes);
 app.use('/api',         jobRoutes);
 app.use('/api/admin',   adminRoutes);
+app.use('/api/payments', paymentRoutes); // ADDED: payments (Razorpay)
+app.use('/api/banners',  bannerRoutes); // ADDED: admin-managed banners
+app.use('/api/parent-tuitions', parentTuitionRoutes); // ADDED: parent multiple tuition posts
 
 // Tutors for parents
 const adminCtrl = require('./controllers/adminController');

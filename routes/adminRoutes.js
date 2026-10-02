@@ -44,6 +44,8 @@ router.get ('/tutors-list',     auth(['parent']), c.getTutorsForParent);
 
 // ADDED: teacher database with contact info for logged-in schools (View Contact)
 router.get ('/school/teachers', auth(['school']), c.getTeachersForSchool);
+// ADDED: school spends 1 credit to view a teacher's contact (charged once per teacher)
+router.post('/school/unlock-contact', auth(['school']), c.unlockTeacherContact);
 
 // ADDED: parent contact credits (5 free on signup; server-side balance)
 router.get ('/parent/credits',    auth(['parent']), c.getParentCredits);
