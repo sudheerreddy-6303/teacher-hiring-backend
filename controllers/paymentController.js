@@ -402,7 +402,15 @@ async function createOrder(req, res) {
       prefill_email: req.user.email || '',
     });
   } catch (err) {
-    res.status(500).json({ message: 'Could not create payment order: ' + err.message });
+    // CHANGED (additive): surface the REAL Razorpay reason. The SDK rejects with an
+    // object like { statusCode, error: { code, description } } that has no .message,
+    // which is why this used to say "undefined". Now we log and return the actual cause.
+    const rzpDesc =
+      (err && err.error && err.error.description) ||
+      (err && err.message) ||
+      (() => { try { return JSON.stringify(err); } catch (e) { return String(err); } })();
+    console.error('[createOrder] Razorpay error:', err && err.statusCode, rzpDesc, err);
+    res.status(500).json({ message: 'Could not create payment order: ' + rzpDesc });
   }
 }
 
