@@ -249,6 +249,23 @@ async function setupDatabase() {
       ['remarks','TEXT'],['completion_pct','INT DEFAULT 0'],['profile_photo','VARCHAR(500)'],
       ['terms_accepted',"VARCHAR(10) DEFAULT 'No'"],
     ]) await addCol('teachers', col, def);
+    // ADDED: State & Country from teacher registration (shown in My Profile)
+    await addCol('teachers', 'state',   'VARCHAR(100)');
+    await addCol('teachers', 'country', 'VARCHAR(100)');
+    // ADDED: widen columns that multi-select fields can overflow. In MySQL strict mode a value longer
+    // than the column makes the whole save fail ("Data too long for column ..."), e.g. a teacher who
+    // picks many subjects or qualifications at registration.
+    for (const [col, def] of [
+      ['subject','VARCHAR(1000)'],['qualification','VARCHAR(1000)'],['specialization','VARCHAR(1000)'],
+      ['preferred_locations','VARCHAR(1500)'],
+    ]) { try { await db.query(`ALTER TABLE \`teachers\` MODIFY COLUMN \`${col}\` ${def}`); } catch {} }
+    // ADDED: repair accounts left half-created by that error (login exists, teacher profile missing),
+    // so those teachers can log in and complete Edit Profile instead of being stuck.
+    try {
+      await db.query(`INSERT INTO teachers (user_id, full_name, mobile, current_location)
+                      SELECT u.id, u.name, u.phone, u.city FROM users u
+                      WHERE u.role = 'teacher' AND NOT EXISTS (SELECT 1 FROM teachers t WHERE t.user_id = u.id)`);
+    } catch {}
     // Widen demo_link so it can safely hold up to 3 Google Drive URLs
     try { await db.query('ALTER TABLE `teachers` MODIFY COLUMN `demo_link` VARCHAR(1500)'); } catch {}
     console.log('✅  Teachers table ready');

@@ -90,6 +90,17 @@ async function getProfile(req, res) {
   try {
     const [rows] = await db.query('SELECT * FROM teachers WHERE user_id = ?', [req.user.id]);
     if (!rows.length) return res.status(404).json({ message: 'Teacher profile not found.' });
+    // ADDED: older accounts saved phone / city only on the user record — show them in My Profile too
+    try {
+      const t = rows[0];
+      const [[u]] = await db.query('SELECT name, phone, city FROM users WHERE id = ?', [req.user.id]);
+      if (u) {
+        if (!t.full_name)        t.full_name        = u.name;
+        if (!t.mobile)           t.mobile           = u.phone;
+        if (!t.current_location) t.current_location = u.city;
+      }
+      if (!t.specialization && t.subject) t.specialization = t.subject;
+    } catch (e) { /* fallback only — never block the profile */ }
     res.json(rows[0]);
   } catch (err) {
     console.error('[teacher/profile GET]', err);
@@ -132,6 +143,16 @@ async function updateProfile(req, res) {
     const [result] = await db.query(
       `UPDATE teachers SET ${setClauses} WHERE user_id = ?`, values
     );
+
+    // ADDED: Short Bio, State & Country (from registration) — saved ONLY when the request includes them,
+    // so partial saves (e.g. Resume & Docs → Save Link) can never clear them.
+    const _extra = ['bio', 'state', 'country'].filter(f => req.body[f] !== undefined);
+    if (_extra.length && result.affectedRows > 0) {
+      await db.query(
+        `UPDATE teachers SET ${_extra.map(f => `\`${f}\` = ?`).join(', ')} WHERE user_id = ?`,
+        [..._extra.map(f => (req.body[f] === '' ? null : req.body[f])), req.user.id]
+      );
+    }
 
     if (result.affectedRows === 0) {
       const insertFields = ['user_id', ...fields];

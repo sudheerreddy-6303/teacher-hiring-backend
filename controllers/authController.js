@@ -119,6 +119,70 @@ async function signup(req, res) {
         'INSERT INTO teachers (user_id, subject, experience, qualification, bio) VALUES (?,?,?,?,?)',
         [userId, subject || null, experience || null, qualification || null, bio || null]
       );
+      // ADDED (per request): every NEW teacher registration gets 10 free credits (1 credit = 1 job application).
+      // Wrapped in try/catch so a credits problem can never block the signup itself.
+      try {
+        const FREE_TEACHER_CREDITS = 10;
+        try {
+          await db.query('UPDATE users SET credits = COALESCE(credits,0) + ? WHERE id = ?', [FREE_TEACHER_CREDITS, userId]);
+        } catch (eCol) {
+          // credits column not created yet on this database → create it, then add the free credits
+          await db.query('ALTER TABLE users ADD COLUMN `credits` INT DEFAULT 0');
+          await db.query('UPDATE users SET credits = COALESCE(credits,0) + ? WHERE id = ?', [FREE_TEACHER_CREDITS, userId]);
+        }
+      } catch (eCr) { console.error('[signup] free teacher credits not added:', eCr.message); }
+      // ADDED: teacher registration now sends the SAME profile fields as Admin → Add Teacher
+      // (req.body.tp). Save them into the same columns My Profile / Add Teacher use.
+      // Wrapped in try/catch so a profile-column problem can never block the signup itself.
+      try {
+        const tp = (req.body && typeof req.body.tp === 'object' && req.body.tp) || {};
+        const tpFields = [
+          'gender','dob','preferred_locations','qualification','specialization','total_experience','relevant_experience',
+          'current_role','current_org','current_salary','expected_salary','notice_period','available_from','certifications',
+          'work_mode','tutor_type','subjects','grades_handling','boards_handled','competitive_exams','teaching_mode','languages',
+          'demo_available','demo_link','residential_pref','relocation_ready','accommodation_req','aadhaar_verified',
+          'resume_link','resume_file_name','profile_status','remarks','terms_accepted',
+        ];
+        const clean = (f, v) => {
+          if (v === undefined || v === null || v === '') return null;
+          if ((f === 'dob' || f === 'available_from') && typeof v === 'string' && v.includes('T')) return v.split('T')[0];
+          return v;
+        };
+        const vals = {
+          full_name: name, mobile: phone || null, current_location: city || null,
+          ...Object.fromEntries(tpFields.map(f => [f, clean(f, tp[f])])),
+        };
+        if (!vals.profile_status) vals.profile_status = 'Active';
+        // ADDED: State & Country from registration Step 1
+        vals.state   = req.body.state   || null;
+        vals.country = req.body.country || null;
+        if (Object.keys(tp).length) {
+          const keys = Object.keys(vals);
+          await db.query(
+            `UPDATE teachers SET ${keys.map(k => `\`${k}\` = ?`).join(', ')} WHERE user_id = ?`,
+            [...keys.map(k => vals[k]), userId]
+          );
+        }
+      } catch (e) {
+        console.error('[signup] teacher profile fields not saved together:', e.message);
+        // ADDED: fall back to saving each detail on its own, so one rejected value can't lose all the others
+        try {
+          const tp2 = (req.body && typeof req.body.tp === 'object' && req.body.tp) || {};
+          const one = { full_name: name, mobile: phone || null, current_location: city || null,
+                        state: req.body.state || null, country: req.body.country || null, profile_status: tp2.profile_status || 'Active' };
+          for (const [k, v] of Object.entries(tp2)) if (!k.startsWith('_') && v !== '' && v != null) one[k] = (k === 'dob' || k === 'available_from') && String(v).includes('T') ? String(v).split('T')[0] : v;
+          for (const [k, v] of Object.entries(one)) {
+            const ALLOWED = ['full_name','mobile','current_location','state','country','gender','dob','preferred_locations','qualification',
+              'specialization','total_experience','relevant_experience','current_role','current_org','current_salary','expected_salary',
+              'notice_period','available_from','certifications','work_mode','tutor_type','subjects','grades_handling','boards_handled',
+              'competitive_exams','teaching_mode','languages','demo_available','demo_link','residential_pref','relocation_ready',
+              'accommodation_req','aadhaar_verified','resume_link','resume_file_name','profile_status','remarks','terms_accepted'];
+            if (!ALLOWED.includes(k)) continue; // only known profile columns
+            try { await db.query(`UPDATE teachers SET \`${k}\` = ? WHERE user_id = ?`, [v, userId]); }
+            catch (e2) { console.error(`[signup] teacher field ${k} not saved:`, e2.message); }
+          }
+        } catch (e3) { console.error('[signup] per-field save failed:', e3.message); }
+      }
     } else if (role === 'tutor') {
       // Extra tutor fields (multi-selects arrive as arrays; resume as base64)
       const { subjects, qualifications, availability, address, tutor_location,
