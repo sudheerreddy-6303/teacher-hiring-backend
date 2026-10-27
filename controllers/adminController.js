@@ -2,6 +2,7 @@
 const db = require('../config/db');
 const bcrypt = require('bcryptjs');
 const { generateRequirementId } = require('../utils/reqId');
+const { saveBlob } = require('./fileController'); // ADDED: store admin-uploaded tutor photo/resume bytes
 
 // Make sure the tutors.gender column exists (runs once, lazily) so public tutor
 // listings can always return gender instead of silently dropping it.
@@ -467,13 +468,69 @@ async function updateTeacher(req, res) {
 // POST /api/admin/tutors
 async function createTutor(req, res) {
   try {
-    const { name, email, phone, city, subject, experience, qualification, hourly_rate, teaching_mode, password } = req.body;
+    const b = req.body;
+    const { name, email, phone, city, password } = b;
     if (!name || !email) return res.status(400).json({ message: 'Name and email are required.' });
     const userId = await insertUser({ name, email, phone, city, role: 'tutor', password });
-    await db.query(
-      'INSERT INTO tutors (user_id, subject, experience, qualification, hourly_rate, teaching_mode) VALUES (?,?,?,?,?,?)',
-      [userId, subject||null, experience||null, qualification||null, hourly_rate||null, teaching_mode||'Both']
-    );
+
+    // ADDED: the admin "Add Tutor" form now mirrors the full tutor registration.
+    // Normalise the multi-selects (they arrive as comma strings, sometimes arrays).
+    const csv = (v) => Array.isArray(v) ? v.filter(Boolean).join(', ') : (v == null ? null : (String(v).trim() || null));
+    const subjectStr = csv(b.subjects || b.subject);
+    const qualStr    = csv(b.qualifications || b.qualification);
+    const availStr   = csv(b.availability);
+    const classesStr = (Array.isArray(b.classes_taught) ? b.classes_taught : String(b.classes_taught || '').split(','))
+      .map(s => String(s).trim()).filter(Boolean).slice(0, 3).join(', ') || null;
+
+    // ADDED: optional resume upload (base64) → stored in file_blobs, link kept on the row.
+    let resumeLink = null, resumeFileName = null;
+    if (b.resume_base64) {
+      try {
+        const rbuf  = Buffer.from(String(b.resume_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+        const rsafe = (b.resume_name || 'resume.pdf').replace(/[^a-zA-Z0-9._-]/g, '_');
+        const rfname = `tutorresume_${userId}_${Date.now()}_${rsafe}`;
+        await saveBlob(userId, 'resume', rfname, b.resume_type || 'application/pdf', rbuf);
+        resumeFileName = b.resume_name || rsafe;
+        resumeLink = `/uploads/resumes/${rfname}`;
+      } catch (e) { console.error('[admin createTutor resume]', e.message); }
+    }
+    // ADDED: optional photo upload (base64).
+    let photoLink = null, photoFileName = null;
+    if (b.tutor_photo_base64) {
+      try {
+        const pbuf  = Buffer.from(String(b.tutor_photo_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+        const psafe = (b.tutor_photo_name || 'photo.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
+        const pfname = `tutorphoto_${userId}_${Date.now()}_${psafe}`;
+        await saveBlob(userId, 'photo', pfname, b.tutor_photo_type || 'image/jpeg', pbuf);
+        photoFileName = b.tutor_photo_name || psafe;
+        photoLink = `/uploads/photos/${pfname}`;
+      } catch (e) { console.error('[admin createTutor photo]', e.message); }
+    }
+
+    try {
+      // Rich insert — all the registration fields. Falls back to the minimal set
+      // below if the extended tutor columns aren't present on this database.
+      await db.query(
+        `INSERT INTO tutors (user_id, subject, subjects, experience, qualification, qualifications,
+           hourly_rate, teaching_mode, bio, address, location, pincode, availability, class_link,
+           resume_link, resume_file_name, gender,
+           photo_link, photo_file_name, classes_taught,
+           demo_class_link, about_yourself, profile_status)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [userId, subjectStr, subjectStr, b.experience || null, qualStr, qualStr,
+         b.hourly_rate || null, b.teaching_mode || 'Both', b.bio || null, b.address || null,
+         b.tutor_location || b.location || null, b.pincode || null, availStr, b.class_link || null,
+         resumeLink, resumeFileName, b.gender || null,
+         photoLink, photoFileName, classesStr,
+         b.demo_class_link || null, b.about_yourself || null, b.profile_status || 'Active']
+      );
+    } catch (e) {
+      console.error('[admin createTutor] rich insert failed, using fallback:', e.message);
+      await db.query(
+        'INSERT INTO tutors (user_id, subject, experience, qualification, hourly_rate, teaching_mode) VALUES (?,?,?,?,?,?)',
+        [userId, subjectStr, b.experience || null, qualStr, b.hourly_rate || null, b.teaching_mode || 'Both']
+      );
+    }
     res.status(201).json({ message: 'Tutor added successfully.', id: userId });
   } catch (err) { res.status(err.status || 500).json({ message: err.message || 'Error adding tutor.' }); }
 }
@@ -961,7 +1018,7 @@ async function useParentCredit(req, res) {
     if (_have <= 0) {
       return res.status(402).json({ message: 'No credits left. Please upgrade to continue contacting tutors.', credits: 0 });
     }
-    await db.query('UPDATE parents SET credits = GREATEST(COALESCE(credits, 5) - 1, 0) WHERE user_id = ?', [req.user.id]);
+    await db.query('UPDATE parents SET credits = GREATEST(COALESCE(credits, 20) - 1, 0) WHERE user_id = ?', [req.user.id]);
     const [[_r2]] = await db.query('SELECT COALESCE(credits, 0) AS credits FROM parents WHERE user_id = ?', [req.user.id]);
     res.json({ credits: _r2 ? Number(_r2.credits) : Math.max(_have - 1, 0), charged: true });
   } catch (err) { res.status(500).json({ message: 'Error using credit: ' + err.message }); }

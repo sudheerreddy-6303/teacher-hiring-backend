@@ -181,6 +181,105 @@ async function setupDatabase() {
     }
     }
   } catch (err) { console.error('⚠️  Admin setup:', err.message); }
+
+  // ── ONE-TIME: give ALL existing teachers 5 free credits and ALL parents 20 ──
+  // Runs exactly ONCE (guarded by the app_migrations table). After it has run,
+  // future restarts/deploys skip it — so nobody's spent credits ever get reset.
+  try {
+    await db.query(`CREATE TABLE IF NOT EXISTS app_migrations (
+      name VARCHAR(100) PRIMARY KEY,
+      applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+    const MIG = 'free_credits_teacher5_parent20_v1';
+    const [[done]] = await db.query('SELECT name FROM app_migrations WHERE name = ?', [MIG]);
+    if (!done) {
+      try { await addCol('users',   'credits', 'INT DEFAULT 0');  } catch {}
+      try { await addCol('parents', 'credits', 'INT DEFAULT 20'); } catch {}
+      const [t] = await db.query("UPDATE users SET credits = 5 WHERE role = 'teacher'");
+      const [p] = await db.query('UPDATE parents SET credits = 20');
+      await db.query('INSERT INTO app_migrations (name) VALUES (?)', [MIG]);
+      console.log(`✅  Free-credits migration applied: ${t.affectedRows} teachers → 5, ${p.affectedRows} parents → 20`);
+    } else {
+      console.log('ℹ️  Free-credits migration already applied — skipped.');
+    }
+  } catch (err) { console.error('⚠️  Free-credits migration:', err.message); }
+
+  // ── DEMO ACCOUNTS (for testing every dashboard WITHOUT email OTP) ──────────
+  // Only runs when SEED_DEMO=1 is set in the backend env (Railway → Variables).
+  // Creates/refreshes one verified login per role, each with 25 credits so you
+  // can test apply / post / contact freely. Safe to leave off in production.
+  if (String(process.env.SEED_DEMO || '') === '1') {
+    try {
+      const bcrypt = require('bcryptjs');
+      const DEMO_PASS = process.env.DEMO_PASSWORD || 'Demo@12345';
+      const hash = await bcrypt.hash(DEMO_PASS, 10);
+      const DEMO = [
+        { name: 'Demo Teacher', email: 'teacher.demo@acadhr.com', role: 'teacher', city: 'Hyderabad' },
+        { name: 'Demo Tutor',   email: 'tutor.demo@acadhr.com',   role: 'tutor',   city: 'Hyderabad' },
+        { name: 'Demo School',  email: 'school.demo@acadhr.com',  role: 'school',  city: 'Hyderabad' },
+        { name: 'Demo Parent',  email: 'parent.demo@acadhr.com',  role: 'parent',  city: 'Hyderabad' },
+        { name: 'Demo Admin',   email: 'admin.demo@acadhr.com',   role: 'admin',   city: 'Hyderabad' },
+      ];
+      for (const d of DEMO) {
+        try {
+          // 1) user row — create if missing, else refresh password/verified/active
+          const [[ex]] = await db.query('SELECT id FROM users WHERE email=?', [d.email]);
+          let id;
+          if (ex) {
+            id = ex.id;
+            await db.query('UPDATE users SET password=?, role=?, is_email_verified=1, is_active=1 WHERE id=?', [hash, d.role, id]);
+          } else {
+            const [r] = await db.query(
+              'INSERT INTO users (name,email,password,phone,city,role,is_email_verified,is_active) VALUES (?,?,?,?,?,?,1,1)',
+              [d.name, d.email, hash, '9999999999', d.city, d.role]
+            );
+            id = r.insertId;
+          }
+          // 2) credits = 25 (so testing is never blocked)
+          try { await addCol('users', 'credits', 'INT DEFAULT 0'); } catch {}
+          await db.query('UPDATE users SET credits=25 WHERE id=?', [id]);
+
+          // 3) role-specific profile row (minimal sample data), created if missing
+          if (d.role === 'teacher') {
+            const [[t]] = await db.query('SELECT user_id FROM teachers WHERE user_id=?', [id]);
+            if (!t) await db.query('INSERT INTO teachers (user_id, subject, experience, qualification, bio) VALUES (?,?,?,?,?)',
+              [id, 'Mathematics, Physics', '3-5 years', 'M.Sc, B.Ed', 'Demo teacher account for testing.']);
+          } else if (d.role === 'tutor') {
+            const [[t]] = await db.query('SELECT user_id FROM tutors WHERE user_id=?', [id]);
+            if (!t) {
+              try {
+                await db.query('INSERT INTO tutors (user_id, subject, subjects, experience, qualification, teaching_mode, profile_status) VALUES (?,?,?,?,?,?,?)',
+                  [id, 'Mathematics', 'Mathematics, Science', '3-5 years', 'M.Sc', 'Both', 'Active']);
+              } catch (e) {
+                await db.query('INSERT INTO tutors (user_id, subject, experience, qualification, teaching_mode) VALUES (?,?,?,?,?)',
+                  [id, 'Mathematics', '3-5 years', 'M.Sc', 'Both']);
+              }
+            }
+          } else if (d.role === 'parent') {
+            const [[p]] = await db.query('SELECT user_id FROM parents WHERE user_id=?', [id]);
+            if (!p) {
+              try { await db.query('INSERT INTO parents (user_id, student_name, student_class, subject, credits) VALUES (?,?,?,?,25)',
+                [id, 'Demo Student', 'Grade 8', 'Mathematics']); }
+              catch (e) { await db.query('INSERT INTO parents (user_id, student_name, student_class, subject) VALUES (?,?,?,?)',
+                [id, 'Demo Student', 'Grade 8', 'Mathematics']); }
+            } else {
+              try { await db.query('UPDATE parents SET credits=25 WHERE user_id=?', [id]); } catch {}
+            }
+          } else if (d.role === 'school') {
+            const [[s]] = await db.query('SELECT user_id FROM schools WHERE user_id=?', [id]);
+            if (!s) {
+              try { await db.query('INSERT INTO schools (user_id, name, institute_type) VALUES (?,?,?)',
+                [id, 'Demo Public School', 'School (CBSE)']); }
+              catch (e) { await db.query('INSERT INTO schools (user_id, name) VALUES (?,?)', [id, 'Demo Public School']); }
+            }
+          }
+          console.log(`  ✓ demo ${d.role}: ${d.email}`);
+        } catch (e) { console.error(`  ⚠️ demo ${d.role} failed:`, e.message); }
+      }
+      console.log(`✅  Demo accounts ready — password: ${DEMO_PASS}  (unset SEED_DEMO to stop re-seeding)`);
+    } catch (err) { console.error('⚠️  Demo seeding:', err.message); }
+  }
+
   try {
     const [cols] = await db.query(
       `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS

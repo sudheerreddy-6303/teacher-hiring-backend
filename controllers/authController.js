@@ -119,10 +119,11 @@ async function signup(req, res) {
         'INSERT INTO teachers (user_id, subject, experience, qualification, bio) VALUES (?,?,?,?,?)',
         [userId, subject || null, experience || null, qualification || null, bio || null]
       );
-      // ADDED (per request): every NEW teacher registration gets 10 free credits (1 credit = 1 job application).
+      // ADDED (per request): every NEW teacher registration gets 5 free credits
+      // (1 credit = 1 job application) — matches the "Apply to up to 5 jobs" free card.
       // Wrapped in try/catch so a credits problem can never block the signup itself.
       try {
-        const FREE_TEACHER_CREDITS = 10;
+        const FREE_TEACHER_CREDITS = 5;
         try {
           await db.query('UPDATE users SET credits = COALESCE(credits,0) + ? WHERE id = ?', [FREE_TEACHER_CREDITS, userId]);
         } catch (eCol) {
@@ -293,6 +294,19 @@ async function signup(req, res) {
            budget || null, tutor_gender_pref || null, experience_req || null, notes || null]
         );
       }
+      // ADDED: every NEW parent starts with 20 FREE contact credits — seed the
+      // value explicitly so it is never left empty (NULL). Wrapped so a credits
+      // problem can never block the signup itself.
+      try {
+        const FREE_PARENT_CREDITS = 20;
+        try {
+          await db.query('UPDATE parents SET credits = ? WHERE user_id = ?', [FREE_PARENT_CREDITS, userId]);
+        } catch (eCol) {
+          // credits column not created yet → create it (default 20), then seed.
+          await db.query('ALTER TABLE parents ADD COLUMN `credits` INT DEFAULT 20');
+          await db.query('UPDATE parents SET credits = ? WHERE user_id = ?', [FREE_PARENT_CREDITS, userId]);
+        }
+      } catch (eCr) { console.error('[signup] free parent credits not seeded:', eCr.message); }
     }
 
     await db.query('DELETE FROM otps WHERE email = ? AND type = ?', [email, 'signup']);
@@ -313,6 +327,18 @@ async function sendLoginOtp(req, res) {
     if (!user) return res.status(401).json({ message: 'Invalid email or password.' });
     const match = await bcrypt.compare(password, user.password);
     if (!match) return res.status(401).json({ message: 'Invalid email or password.' });
+
+    // ADDED: DEMO accounts (….demo@acadhr.com) skip the login verification code —
+    // they use fake inboxes for testing. Real users still verify by email OTP below.
+    if (/\.demo@acadhr\.com$/i.test(String(email))) {
+      let subject = null;
+      if (user.role === 'teacher')      { const [[r]] = await db.query('SELECT subject FROM teachers WHERE user_id = ?', [user.id]); subject = r?.subject || null; }
+      else if (user.role === 'tutor')   { const [[r]] = await db.query('SELECT subject FROM tutors  WHERE user_id = ?', [user.id]); subject = r?.subject || null; }
+      else if (user.role === 'parent')  { const [[r]] = await db.query('SELECT subject FROM parents WHERE user_id = ?', [user.id]); subject = r?.subject || null; }
+      const token = jwt.sign({ id: user.id, name: user.name, email: user.email, role: user.role, city: user.city }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+      return res.json({ direct: true, message: 'Login successful.', token, user: { id: user.id, name: user.name, email: user.email, role: user.role, city: user.city, phone: user.phone, subject } });
+    }
+
     const otp = generateOtp();
     const exp = new Date(Date.now() + OTP_EXPIRY_MINS * 60000);
     await db.query('DELETE FROM otps WHERE email = ? AND type = ?', [email, 'login']);
