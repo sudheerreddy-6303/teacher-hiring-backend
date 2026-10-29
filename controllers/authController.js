@@ -267,6 +267,56 @@ async function signup(req, res) {
           if (val) await db.query(`UPDATE schools SET \`${col}\`=? WHERE user_id=?`, [val, userId]);
         } catch (e) { /* non-fatal */ }
       }
+
+      // ── ADDED: store the FULL School / Institution registration details ──
+      try {
+        const b = req.body;
+        const scols = [
+          ['country','VARCHAR(100)'],
+          ['board_university','VARCHAR(100)'], ['contact_person','VARCHAR(150)'], ['designation','VARCHAR(100)'],
+          ['official_email','VARCHAR(150)'], ['alt_phone','VARCHAR(30)'], ['area_locality','VARCHAR(200)'],
+          ['full_address','TEXT'], ['pincode','VARCHAR(20)'], ['has_branches','VARCHAR(5)'], ['branches_json','TEXT'],
+          ['logo_link','VARCHAR(500)'], ['logo_file_name','VARCHAR(255)'],
+          ['doc_reg_link','VARCHAR(500)'], ['doc_reg_name','VARCHAR(255)'],
+          ['doc_aff_link','VARCHAR(500)'], ['doc_aff_name','VARCHAR(255)'],
+          ['doc_id_link','VARCHAR(500)'], ['doc_id_name','VARCHAR(255)'],
+          ['terms_accepted','TINYINT DEFAULT 0'], ['privacy_accepted','TINYINT DEFAULT 0'],
+        ];
+        for (const [col, def] of scols) {
+          try {
+            const [c] = await db.query("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='schools' AND COLUMN_NAME=?", [col]);
+            if (!c.length) await db.query(`ALTER TABLE schools ADD COLUMN \`${col}\` ${def}`);
+          } catch (e) { /* non-fatal */ }
+        }
+        // Each uploaded file gets a DISTINCT kind so they never overwrite each other.
+        const saveSchoolFile = async (b64, name, type, kind, prefix) => {
+          if (!b64) return { link: null, fname: null };
+          try {
+            const buf = Buffer.from(String(b64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+            const safe = (name || kind).replace(/[^a-zA-Z0-9._-]/g, '_');
+            const fname = `${kind}_${userId}_${Date.now()}_${safe}`;
+            await saveBlob(userId, kind, fname, type || 'application/octet-stream', buf);
+            return { link: `/uploads/${prefix}/${fname}`, fname: name || safe };
+          } catch (e) { console.error('[school file]', kind, e.message); return { link: null, fname: null }; }
+        };
+        const logo = await saveSchoolFile(b.school_logo_base64, b.school_logo_name, b.school_logo_type, 'schoollogo', 'photos');
+        const reg  = await saveSchoolFile(b.doc_reg_base64, b.doc_reg_name, b.doc_reg_type, 'schoolreg', 'resumes');
+        const aff  = await saveSchoolFile(b.doc_aff_base64, b.doc_aff_name, b.doc_aff_type, 'schoolaff', 'resumes');
+        const idp  = await saveSchoolFile(b.doc_id_base64,  b.doc_id_name,  b.doc_id_type,  'schoolid',  'resumes');
+        let branchesJson = '[]';
+        try { branchesJson = JSON.stringify(Array.isArray(b.branches) ? b.branches : []); } catch (e) {}
+        await db.query(
+          `UPDATE schools SET country=?, board_university=?, contact_person=?, designation=?, official_email=?, alt_phone=?,
+             area_locality=?, full_address=?, pincode=?, has_branches=?, branches_json=?,
+             logo_link=?, logo_file_name=?, doc_reg_link=?, doc_reg_name=?, doc_aff_link=?, doc_aff_name=?,
+             doc_id_link=?, doc_id_name=?, terms_accepted=?, privacy_accepted=?
+           WHERE user_id=?`,
+          [b.country || null, b.board_university || null, b.contact_person || null, b.designation || null, b.official_email || null, b.alt_phone || null,
+           b.area_locality || null, b.full_address || null, b.school_pincode || null, b.has_branches || 'No', branchesJson,
+           logo.link, logo.fname, reg.link, reg.fname, aff.link, aff.fname,
+           idp.link, idp.fname, b.school_terms_accepted ? 1 : 0, b.school_privacy_accepted ? 1 : 0, userId]
+        );
+      } catch (e) { console.error('[signup school extended]', e.message); }
     } else if (role === 'parent') {
       const { parent_pincode, parent_state, parent_landmark, hourly_budget, institute_name } = req.body;
       const { courses, preferred_days } = req.body;
